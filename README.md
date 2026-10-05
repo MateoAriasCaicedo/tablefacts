@@ -330,9 +330,9 @@ and its declarations fails the tests. Document options with JSDoc in `src/lib/ty
 CI (`.github/workflows/ci.yml`) runs the tests on Ubuntu and Windows with Node 24 and checks `npm pack --dry-run`
 on every push to `main` and every pull request. Dependabot (`.github/dependabot.yml`) keeps dependencies current.
 
-**Release:** bump `version` in `package.json`, commit, then push a matching tag, e.g. `git tag v0.1.1 && git push origin v0.1.1`.
-`.github/workflows/release.yml` checks the tag equals the version, runs the tests, publishes to npm with provenance
-(needs an `NPM_TOKEN` repository secret) and creates a GitHub release with generated notes.
+**Release:** publishing is manual. Bump `version` in `package.json`, add the entry to `CHANGELOG.md`, commit, then
+run `npm publish` from a clean checkout of that commit. Publishing is not automated in CI; `prepublishOnly` builds
+`types/` and runs the tests first. Optionally tag the release commit (`git tag v0.1.1 && git push origin v0.1.1`).
 
 For how the code is organised and how to add a source or a tool, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

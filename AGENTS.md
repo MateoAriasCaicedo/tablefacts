@@ -74,5 +74,6 @@ Every tool is a **library function** plus a thin **command**.
 
 ## Releasing
 
-Bump `version` in `package.json`, commit, push a matching tag (`v0.1.1`); `.github/workflows/release.yml`
-tests and publishes. Only do this when the user asks.
+Publishing is manual and is not part of CI. Bump `version` in `package.json`, add the entry to `CHANGELOG.md`,
+commit, then run `npm publish` (`prepublishOnly` builds `types/` and runs the tests). Only do this when the user
+asks.
