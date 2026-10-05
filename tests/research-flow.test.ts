@@ -90,6 +90,8 @@ describe("research()", { timeout: 30000 }, () => {
     });
     const result = await research({ name: "La Casa", location: "Medellin", googleKey: "k", out: out() });
     expect(calls.some((u) => u.includes("places.googleapis.com"))).toBe(true);
+    // Google already gave a website, so the key-free web search is not run.
+    expect(calls.some((u) => u.includes("duckduckgo"))).toBe(false);
     expect(result.notes.join("\n")).toMatch(/Google Places: matched "La Casa"/);
     expect(result.notes.join("\n")).toMatch(/OpenStreetMap: no match/);
     // the website came from Google, so it was read without --website
@@ -127,5 +129,113 @@ describe("research()", { timeout: 30000 }, () => {
     const result = await research({ name: "La Casa Verde", google: false, projectDir: project });
     expect(result.outDir).toContain("la-casa-verde");
     expect(result.outDir.startsWith(project)).toBe(true);
+  });
+
+  it("falls back to a key-free web search when Google and OpenStreetMap find nothing", async () => {
+    const ddg = `<html><body><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent(`${base}/`)}">La Casa</a></body></html>`;
+    stubNetwork((url) => {
+      if (url.includes("duckduckgo.com")) return new Response(ddg, { status: 200, headers: { "content-type": "text/html" } });
+      if (url.includes("nominatim")) return json([]);
+    });
+    const result = await research({ name: "La Casa", location: "Medellin", google: false, out: out() });
+    const text = result.notes.join("\n");
+    expect(text).toMatch(/Web search: 1 result/);
+    expect(text).toMatch(/Website: read/);
+    expect(text).toMatch(/found by web search/);
+  });
+
+  it("warns when Google returns several places with the same name", async () => {
+    stubNetwork((url) => {
+      if (url.includes("places.googleapis.com")) {
+        return json({ places: [
+          { id: "1", displayName: { text: "Makibar" }, formattedAddress: "Cra 1, Medellin", location: { latitude: 6.2, longitude: -75.5 }, websiteUri: `${base}/` },
+          { id: "2", displayName: { text: "Makibar" }, formattedAddress: "Cra 2, Bogota", location: { latitude: 4.6, longitude: -74.1 } },
+        ] });
+      }
+      if (url.includes("nominatim")) return json([]);
+    });
+    const result = await research({ name: "Makibar", location: "Colombia", googleKey: "k", out: out() });
+    expect(result.profile.warnings.join("\n")).toMatch(/looks like a chain/);
+  });
+
+  it("does not warn about a chain for a single Google place", async () => {
+    stubNetwork((url) => {
+      if (url.includes("places.googleapis.com")) {
+        return json({ places: [{ id: "1", displayName: { text: "Makibar" }, formattedAddress: "Cra 1, Medellin", location: { latitude: 6.2, longitude: -75.5 }, websiteUri: `${base}/` }] });
+      }
+      if (url.includes("nominatim")) return json([]);
+    });
+    const result = await research({ name: "Makibar", location: "Colombia", googleKey: "k", out: out() });
+    expect(result.profile.warnings.join("\n")).not.toMatch(/chain/);
+  });
+
+  it("reports an Instagram bio that came from a search snippet", async () => {
+    const ddg = `<html><body><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent("https://www.instagram.com/makibar.col/")}">Makibar</a><a class="result__snippet">1,234 Followers, 56 Following, 789 Posts - Makibar (@makibar.col) on Instagram: "Sushi en Medellín."</a></body></html>`;
+    stubNetwork((url) => {
+      if (url.includes("duckduckgo.com")) return new Response(ddg, { status: 200, headers: { "content-type": "text/html" } });
+      if (url.includes("nominatim")) return json([]);
+      if (url.includes("instagram.com")) return new Response("no", { status: 404 });
+    });
+    const result = await research({ name: "Makibar", location: "Medellin", google: false, out: out() });
+    expect(readFileSync(result.files.report, "utf8")).toContain("Bio from a search snippet");
+  });
+
+  it("keeps a blocked, user-supplied TripAdvisor link and says so at the top of the report", async () => {
+    const taBody = `<html><body><p>${"Please verify you are human. ".repeat(12)}</p></body></html>`;
+    stubNetwork((url) => {
+      if (url.includes("tripadvisor")) return new Response(taBody, { status: 200, headers: { "content-type": "text/html" } });
+      if (url.includes("nominatim")) return json([]);
+    });
+    const result = await research({
+      name: "Maki Bar", location: "Medellin", google: false,
+      tripadvisor: "https://www.tripadvisor.co/Restaurant_Review-g1-d2-Reviews-Maki_Bar_Medellin-Medellin.html", out: out(),
+    });
+    expect(readFileSync(result.files.report, "utf8")).toContain("Kept for a manual read");
+    expect(result.notes.join("\n")).toMatch(/TripAdvisor .*blocked/);
+    // The URL slug is surfaced as a hint in the source note, not as a field.
+    expect(result.notes.join("\n")).toMatch(/URL suggests "Maki Bar Medellin"/);
+  });
+
+  it("follows a link-in-bio hub a web search found", async () => {
+    const reply = (url: string, body: string) => ({ ok: true, status: 200, url, headers: { get: () => "text/html" }, text: async () => body, body: null });
+    const ddg = `<html><body><a class="result__a" href="//duckduckgo.com/l/?uddg=${encodeURIComponent("https://linktr.ee/makibar")}">Makibar links</a></body></html>`;
+    const hubPage = `<html lang="es"><body><a href="https://wa.me/573001234567">WhatsApp</a>${"x".repeat(320)}</body></html>`;
+    stubNetwork((url) => {
+      if (url.includes("duckduckgo.com")) return reply(url, ddg);
+      if (url.includes("nominatim")) return json([]);
+      if (url.includes("linktr.ee")) return reply(url, hubPage);
+    });
+    const result = await research({ name: "Makibar", location: "Medellin", google: false, out: out() });
+    expect(result.notes.join("\n")).toMatch(/Link-in-bio: read https:\/\/linktr\.ee\/makibar/);
+  });
+
+  it("labels a TripAdvisor link found on the restaurant's own site as 'website'", async () => {
+    const taBody = `<html><body><p>${"Please verify you are human. ".repeat(12)}</p></body></html>`;
+    stubNetwork((url) => {
+      if (url.includes("tripadvisor")) return new Response(taBody, { status: 200, headers: { "content-type": "text/html" } });
+      if (url.includes("nominatim")) return json([]);
+    });
+    // The fixture site's JSON-LD sameAs points at TripAdvisor; no --tripadvisor was given.
+    const result = await research({ name: "La Casa", location: "Medellin", google: false, website: base, out: out() });
+    expect(result.profile.fields.tripadvisor).toMatchObject({ source: "website" });
+  });
+
+  it("does not write latest.json when an explicit output folder is used", async () => {
+    stubNetwork(() => json([]));
+    const parent = out();
+    const dir = join(parent, "run-1");
+    const result = await research({ name: "Nowhere Bistro", google: false, out: dir });
+    expect(result.outDir).toBe(dir);
+    expect(existsSync(join(parent, "latest.json"))).toBe(false);
+  });
+
+  it("points at the newest run when a similar name was researched before", async () => {
+    stubNetwork(() => json([]));
+    const project = out();
+    await research({ name: "Makibar", location: "Medellin", google: false, projectDir: project });
+    const second = await research({ name: "Maki Bar", location: "Medellin", google: false, projectDir: project });
+    expect(second.notes.join("\n")).toMatch(/similar name/);
+    const latest = JSON.parse(readFileSync(join(project, ".tablefacts", "research", "latest.json"), "utf8"));
+    expect(latest.slug).toBe("maki-bar");
   });
 });

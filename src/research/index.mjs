@@ -1,8 +1,8 @@
 // Programmatic entry for the research pipeline: gathers what the public web says
 // about a restaurant and writes profile.json, report.md and setup-answers.txt.
 // Silent by default and never exits the process; the CLI lives in research.mjs.
-import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdir, readdir, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { resolveEnv } from "../lib/env.mjs";
 import { optionError } from "../lib/errors.mjs";
 import { normalizeLog } from "../lib/log.mjs";
@@ -11,8 +11,9 @@ import { downloadPhotos, searchGoogle } from "./lib/google.mjs";
 import { buildProfile } from "./lib/merge.mjs";
 import { searchOsm } from "./lib/osm.mjs";
 import { renderReport, setupAnswers } from "./lib/report.mjs";
+import { searchWeb } from "./lib/search.mjs";
 import { readHub, readInstagram, readTripadvisor } from "./lib/social.mjs";
-import { mapPool, slugify } from "./lib/util.mjs";
+import { mapPool, sameText, slugify } from "./lib/util.mjs";
 import { createBrowser, scrapeSite } from "./lib/website.mjs";
 
 /**
@@ -31,6 +32,7 @@ export async function research(options = {}) {
 
   const slug = slugify(name);
   const outDir = options.out ? resolveIn(options.projectDir, options.out) : workDirIn(options.projectDir, "research", slug);
+  const researchDir = dirname(outDir);
   const query = { name, location, slug, country, website, instagram: instagramOpt, tripadvisor: tripadvisorOpt, linktree };
   const notes = [];
 
@@ -50,7 +52,7 @@ export async function research(options = {}) {
 
   // One Chromium for the whole run, launched only if a page needs rendering.
   const browser = createBrowser();
-  let site, instagram, hub, tripadvisor, taUrl, handle, google, osm;
+  let site, instagram, hub, tripadvisor, taUrl, handle, google, osm, search, branches = [];
   try {
     // Google and OpenStreetMap only need the name and place, so they run together; their notes are added in this order afterwards.
     const googleNotes = [];
@@ -65,20 +67,33 @@ export async function research(options = {}) {
     notes.push(...googleNotes, ...osmNotes);
     google = googleResult?.place ?? null;
     osm = osmResult?.place ?? null;
+    // Several Google places with the same name are likely branches of one chain; the template assumes one address.
+    branches = (googleResult?.candidates ?? []).filter((c) => sameText(c.name, name));
 
-    const websiteUrl = website ?? google?.website ?? osm?.website;
+    // No website yet: a key-free web search turns a bare name + place into candidate links.
+    if (!website && !google?.website && !osm?.website) {
+      search = await source("Web search", () => searchWeb({ name, location }));
+      if (search) {
+        const found = search.candidates.length ? ` (${search.candidates.slice(0, 2).map((c) => c.title || c.url).join(", ")})` : "";
+        notes.push(`Web search: ${search.results.length ? `${search.results.length} result(s) for "${search.query}"${found}` : `no results for "${search.query}"`}`);
+      }
+    }
+
+    const websiteUrl = website ?? google?.website ?? osm?.website ?? search?.website;
     site = websiteUrl ? await source("Website", () => scrapeSite(websiteUrl, { renderJs: render, browser })) : null;
-    if (site) notes.push(`Website: read ${site.pages.length} page(s) of ${site.url}${site.pages.some((p) => p.rendered) ? " (rendered with Playwright)" : ""}`);
+    if (site) notes.push(`Website: read ${site.pages.length} page(s) of ${site.url}${site.pages.some((p) => p.rendered) ? " (rendered with Playwright)" : ""}${!website && !google?.website && !osm?.website ? " (found by web search)" : ""}`);
     else if (!websiteUrl) notes.push("Website: none found. Pass the website (--website / `website`) if the restaurant has one.");
 
     // Follow the leads the first sources gave. What is already known (handle, TripAdvisor link, hub link)
     // starts right away; the rest waits only for the source that can supply it.
-    handle = (instagramOpt ?? site?.links.instagram[0] ?? osm?.instagram ?? "").replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").split(/[/?#]/)[0];
-    taUrl = tripadvisorOpt ?? site?.links.tripadvisor[0] ?? (site?.jsonld?.sameAs ?? []).find((u) => /tripadvisor\./.test(u));
-    const directHubUrl = linktree ?? site?.links.hubs[0];
+    handle = (instagramOpt ?? site?.links.instagram[0] ?? osm?.instagram ?? search?.instagram ?? "").replace(/^https?:\/\/(www\.)?instagram\.com\//i, "").replace(/^@/, "").split(/[/?#]/)[0];
+    taUrl = tripadvisorOpt ?? site?.links.tripadvisor[0] ?? (site?.jsonld?.sameAs ?? []).find((u) => /tripadvisor\./.test(u)) ?? search?.tripadvisor;
+    const directHubUrl = linktree ?? site?.links.hubs[0] ?? search?.hubs?.[0];
     const readHubAt = (url) => source("Link-in-bio", () => readHub(url, { browser }));
 
-    const instagramP = handle ? source("Instagram", () => readInstagram(handle)) : null;
+    // The search snippet for the profile is a last resort when Instagram walls the bio.
+    const igSnippet = search?.results?.find((r) => /instagram\.com\//i.test(r.url) && r.url.toLowerCase().includes(`/${handle.toLowerCase()}`))?.snippet ?? "";
+    const instagramP = handle ? source("Instagram", () => readInstagram(handle, { snippet: igSnippet })) : null;
     const tripadvisorP = taUrl ? source("TripAdvisor", () => readTripadvisor(taUrl, { browser })) : null;
     // The hub URL comes from the options or the website, else from the Instagram bio.
     const hubTask = (async () => {
@@ -103,17 +118,27 @@ export async function research(options = {}) {
     }
 
     // Notes keep the order of the sequential flow: Instagram, link-in-bio, TripAdvisor.
-    if (instagram) notes.push(instagram.blocked ? `Instagram @${handle}: not readable (${instagram.blocked}). Add the bio by hand, or use \`tablefacts photos instagram\` for posts.` : `Instagram @${handle}: profile card read`);
+    if (instagram) notes.push(instagram.blocked ? `Instagram @${handle}: not readable (${instagram.blocked}). Add the bio by hand, or use \`tablefacts photos instagram\` for posts.` : `Instagram @${handle}: profile read (${instagram.surface ?? "share card"})`);
     else if (!handle) notes.push("Instagram: no handle found. Pass the handle (--instagram / `instagram`).");
     if (hub) notes.push(hub.blocked ? `Link-in-bio ${hubUrl}: not readable (${hub.blocked})` : `Link-in-bio: read ${hub.url}`);
-    if (tripadvisor) notes.push(tripadvisor.blocked ? `TripAdvisor ${taUrl}: blocked (${tripadvisor.blocked}). The link is kept; read it by hand.` : "TripAdvisor: page read");
-    else notes.push("TripAdvisor: no link found. Pass the page (--tripadvisor / `tripadvisor`).");
+    if (tripadvisor) {
+      // The URL slug is a hint the source kept for a manual read; it never becomes a field on its own.
+      const hint = tripadvisor.slug ? ` URL suggests "${tripadvisor.slug.name}"${tripadvisor.slug.location ? `, ${tripadvisor.slug.location}` : ""}.` : "";
+      notes.push(tripadvisor.blocked ? `TripAdvisor ${taUrl}: blocked (${tripadvisor.blocked}). The link is kept; read it by hand.${hint}` : "TripAdvisor: page read");
+    } else notes.push("TripAdvisor: no link found. Pass the page (--tripadvisor / `tripadvisor`).");
   } finally {
     await browser.close();
   }
 
-  const profile = buildProfile({ query, google, osm, site, hub: hub?.blocked ? null : hub, instagram, tripadvisor: tripadvisor?.blocked ? null : tripadvisor });
-  if (tripadvisor?.blocked && taUrl && !profile.fields.tripadvisor) profile.fields.tripadvisor = { value: taUrl, source: "website", confidence: "medium" };
+  const profile = buildProfile({ query, google, osm, site, hub: hub?.blocked ? null : hub, instagram, tripadvisor, search });
+  const taOrigin = tripadvisorOpt ? "you" : (hub?.links?.tripadvisor ?? []).includes(taUrl) ? "link-in-bio" : search?.tripadvisor === taUrl ? "search" : "website";
+  if (tripadvisor?.blocked && taUrl && !profile.fields.tripadvisor) profile.fields.tripadvisor = { value: taUrl, source: taOrigin, confidence: "medium" };
+  if (branches.length > 1) profile.warnings.push(`Google returns ${branches.length} places named like "${name}" (${branches.map((b) => b.address).filter(Boolean).join("; ")}). This looks like a chain: confirm which branch this site is for.`);
+
+  // A link a source could not read is stated at the top of the report, not only in the source list.
+  const kept = [];
+  if (tripadvisor?.blocked && taUrl) kept.push({ label: "TripAdvisor", url: taUrl, reason: tripadvisor.blocked });
+  if (instagram?.blocked && handle) kept.push({ label: `Instagram @${handle}`, url: `https://www.instagram.com/${handle}/`, reason: instagram.blocked });
 
   // Optional photo downloads: reference material, never wired into the site.
   const photos = [];
@@ -137,11 +162,21 @@ export async function research(options = {}) {
     photos.push(...saved.filter(Boolean));
   }
 
+  // Two names for one place ("Makibar" and "Maki Bar") used to make two folders, and reading them all showed
+  // a stale report. Note the sibling run and keep a pointer to the newest, so the last run is the one to read.
+  const loose = slug.replace(/-/g, "");
+  const siblings = options.out ? [] : await readdir(researchDir, { withFileTypes: true })
+    .then((entries) => entries.filter((e) => e.isDirectory() && e.name.replace(/-/g, "") === loose && join(researchDir, e.name) !== outDir).map((e) => e.name))
+    .catch(() => []);
+  if (siblings.length) notes.push(`Other runs with a similar name exist (${siblings.join(", ")}); \`latest.json\` points at the newest. Older folders may be stale.`);
+
   const files = { profile: resolve(outDir, "profile.json"), report: resolve(outDir, "report.md"), setupAnswers: resolve(outDir, "setup-answers.txt") };
   await mkdir(outDir, { recursive: true });
-  await writeFile(files.profile, JSON.stringify({ ...profile, raw: { google, osm, site, hub, instagram, tripadvisor }, photos }, null, 2));
-  await writeFile(files.report, renderReport(profile, { notes, photos }));
+  await writeFile(files.profile, JSON.stringify({ ...profile, raw: { google, osm, site, hub, instagram, tripadvisor, search }, photos }, null, 2));
+  await writeFile(files.report, renderReport(profile, { notes, photos, kept }));
   await writeFile(files.setupAnswers, setupAnswers(profile));
+  // Only the default layout gets the "newest" pointer; a custom --out is the caller's own tree.
+  if (!options.out) await writeFile(join(researchDir, "latest.json"), JSON.stringify({ slug, name, location, generatedAt: profile.generatedAt, outDir, report: files.report }, null, 2));
 
   return { profile, notes, photos, outDir, files };
 }

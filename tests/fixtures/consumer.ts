@@ -62,9 +62,10 @@ export async function run() {
   const broken: Menu = [{ slug: "bar", name: "Bebidas" }];
   void [products, broken];
 
-  const imported: ImportResult = await importMenu({ menu, notes: [], title: "t", dryRun: true, json: "menu.json", replaceAll: false, force: false, databaseUrl: "postgres://x", env, projectDir: ".", log });
+  const imported: ImportResult = await importMenu({ menu, notes: [], title: "t", dryRun: true, json: "menu.json", replaceAll: false, force: false, tablePrefix: "makibar_", allowUnprefixed: false, yes: false, databaseUrl: "postgres://x", env, projectDir: ".", log });
   const kept: string[] = imported.database?.current.kept ?? [];
-  void [kept, imported.written, imported.totals.withImage];
+  const tables: string[] = imported.database?.tables ?? [];
+  void [kept, tables, imported.written, imported.totals.withImage];
   // @ts-expect-error `menu` is required
   await importMenu({ dryRun: true });
 

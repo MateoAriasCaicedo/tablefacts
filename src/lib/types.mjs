@@ -137,7 +137,10 @@
  * @typedef {object} ImportOptions
  * @property {boolean} [dryRun] Check and report, write nothing.
  * @property {string} [json] Also save the extracted menu as JSON at this path (resolved against projectDir).
- * @property {boolean} [replaceAll] Replace the whole menu, not only the categories in this import.
+ * @property {string} [tablePrefix] This restaurant's table prefix (e.g. "makibar_"); empty for the unprefixed menu_* tables. Default "": importCluvi/importImageMenu fall back to the source config's.
+ * @property {boolean} [allowUnprefixed] Write the unprefixed menu_* tables even when other restaurants' prefixed tables exist. Only for a single-restaurant database.
+ * @property {boolean} [yes] Confirm a destructive `replaceAll`, which empties the target tables.
+ * @property {boolean} [replaceAll] Replace the whole menu, not only the categories in this import. Needs `yes`.
  * @property {boolean} [force] Write even if the import has far fewer products than it replaces.
  * @property {string} [databaseUrl] Default: env.SUPABASE_DB_URL.
  * @property {Env} [env] Environment the database URL and keys are read from. Default process.env.
@@ -151,7 +154,7 @@
  * @property {string[]} notes
  * @property {boolean} written
  * @property {boolean} dryRun
- * @property {{ label: string, current: { categories: number, products: number, kept: string[] } } | null} database Null when the database was not reached.
+ * @property {{ label: string, tables: string[], current: { categories: number, products: number, kept: string[] } } | null} database Null when the database was not reached.
  */
 
 /**
@@ -161,6 +164,7 @@
 /**
  * Restaurant-specific part of the Cluvi source (src/menu/cluvi/config.mjs).
  * @typedef {object} CluviConfig
+ * @property {string} [tablePrefix] This restaurant's table prefix in a shared database (e.g. "cannario_"); empty for the unprefixed menu_* tables.
  * @property {string} [url] Any page of the restaurant's Cluvi menu.
  * @property {{ slug: string, name: string, from: string[] }[]} [categories] Cluvi main categories folded into each site category.
  * @property {Record<string, string>} [sections] Cluvi subcategory to section name.
@@ -169,6 +173,7 @@
 /**
  * Restaurant-specific part of the picture-menu source (src/menu/raw/config.mjs).
  * @typedef {object} RawConfig
+ * @property {string} [tablePrefix] This restaurant's table prefix in a shared database (e.g. "mombasa_"); empty for the unprefixed menu_* tables.
  * @property {string} [url] Page with the menu pictures, or a direct image URL.
  * @property {string} currency ISO code of the prices.
  * @property {string} [thousands] Thousands separator the menu prints. Default ".".

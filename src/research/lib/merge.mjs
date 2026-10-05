@@ -35,11 +35,12 @@ const cleanUrl = (u) => {
   } catch { return u; }
 };
 
-export function buildProfile({ query, google, osm, site, hub, instagram, tripadvisor }) {
+export function buildProfile({ query, google, osm, site, hub, instagram, tripadvisor, search }) {
   const g = google ?? {};
   const o = osm ?? {};
   const ld = site?.jsonld ?? null;
   const ta = tripadvisor?.jsonld ?? null;
+  const taSlug = tripadvisor?.slug ?? null;
   const warnings = [];
   const ok = (v) => (v ? v : undefined);
   const hubLinks = hub?.links ?? {};
@@ -54,7 +55,7 @@ export function buildProfile({ query, google, osm, site, hub, instagram, tripadv
   const igLinks = [...(site?.links?.instagram ?? []), ...(hubLinks.instagram ?? [])];
 
   const fields = {
-    name: choose([{ value: g.name, source: "google" }, { value: ld?.name, source: "website" }, { value: ta?.name, source: "tripadvisor" }, { value: o.name, source: "osm" }, { value: site?.meta.siteName, source: "website" }], sameText),
+    name: choose([{ value: g.name, source: "google" }, { value: ld?.name, source: "website" }, { value: ta?.name, source: "tripadvisor" }, { value: o.name, source: "osm" }, { value: site?.meta.siteName, source: "website" }, { value: taSlug?.name, source: "tripadvisor (URL)", low: true }], sameText),
     street: choose([{ value: g.street, source: "google" }, { value: ld?.address.street, source: "website" }, { value: ta?.address.street, source: "tripadvisor" }, { value: o.street, source: "osm" }], sameText),
     locality: choose([{ value: g.locality, source: "google" }, { value: ld?.address.locality, source: "website" }, { value: o.locality, source: "osm" }], sameText),
     region: choose([{ value: g.region, source: "google" }, { value: ld?.address.region, source: "website" }, { value: o.region, source: "osm" }], sameText),
@@ -62,14 +63,14 @@ export function buildProfile({ query, google, osm, site, hub, instagram, tripadv
     coordinates: choose([{ value: g.coords, source: "google" }, { value: o.coords, source: "osm" }, { value: ld?.geo, source: "website" }], coordSame),
     phone: choose([{ value: g.phone, source: "google" }, { value: ok(links("tel")[0]), source: "website" }, { value: ld?.telephone, source: "website" }, { value: ta?.telephone, source: "tripadvisor" }, { value: instagram?.phones?.[0], source: "instagram" }, { value: o.phone, source: "osm" }], phoneSame),
     email: choose([{ value: ld?.email, source: "website" }, { value: links("mail").find((m) => !/sentry|wixpress|example|domain\./i.test(m)), source: "website" }, { value: o.email, source: "osm" }]),
-    instagram: choose([{ value: query.instagram && handleOf(query.instagram), source: "you" }, ...igLinks.map((h) => ({ value: h, source: "website" })), ...(ld?.sameAs ?? []).filter((u) => /instagram\.com/.test(u)).map((u) => ({ value: handleOf(u), source: "website" })), { value: o.instagram && handleOf(o.instagram), source: "osm" }]),
-    facebook: choose([{ value: links("facebook")[0], source: "website" }, { value: o.facebook, source: "osm" }]),
-    tiktok: choose([{ value: links("tiktok")[0], source: "website" }]),
-    tripadvisor: choose([{ value: query.tripadvisor, source: "you" }, { value: links("tripadvisor")[0], source: "website" }, { value: (ld?.sameAs ?? []).find((u) => /tripadvisor\./.test(u)), source: "website" }]),
-    website: choose([{ value: query.website && cleanUrl(query.website), source: "you" }, { value: g.website && cleanUrl(g.website), source: "google" }, { value: o.website && cleanUrl(o.website), source: "osm" }]),
+    instagram: choose([{ value: query.instagram && handleOf(query.instagram), source: "you" }, ...igLinks.map((h) => ({ value: h, source: "website" })), ...(ld?.sameAs ?? []).filter((u) => /instagram\.com/.test(u)).map((u) => ({ value: handleOf(u), source: "website" })), { value: o.instagram && handleOf(o.instagram), source: "osm" }, { value: search?.instagram && handleOf(search.instagram), source: "search" }]),
+    facebook: choose([{ value: links("facebook")[0], source: "website" }, { value: o.facebook, source: "osm" }, { value: search?.facebook && cleanUrl(search.facebook), source: "search" }]),
+    tiktok: choose([{ value: links("tiktok")[0], source: "website" }, { value: search?.tiktok && cleanUrl(search.tiktok), source: "search" }]),
+    tripadvisor: choose([{ value: query.tripadvisor, source: "you" }, { value: links("tripadvisor")[0], source: "website" }, { value: (ld?.sameAs ?? []).find((u) => /tripadvisor\./.test(u)), source: "website" }, { value: search?.tripadvisor && cleanUrl(search.tripadvisor), source: "search" }]),
+    website: choose([{ value: query.website && cleanUrl(query.website), source: "you" }, { value: g.website && cleanUrl(g.website), source: "google" }, { value: o.website && cleanUrl(o.website), source: "osm" }, { value: search?.website && cleanUrl(search.website), source: "search" }]),
     reserveUrl: choose([...links("reserve").map((u) => ({ value: u, source: "website" }))]),
     priceRange: choose([{ value: g.priceRange, source: "google" }, { value: ld?.priceRange, source: "website" }, { value: ta?.priceRange, source: "tripadvisor" }]),
-    mapsUrl: choose([{ value: g.mapsUrl, source: "google" }, { value: links("maps")[0], source: "website" }]),
+    mapsUrl: choose([{ value: g.mapsUrl, source: "google" }, { value: links("maps")[0], source: "website" }, { value: search?.mapsUrl && cleanUrl(search.mapsUrl), source: "search" }]),
     descriptor: choose([{ value: g.descriptor, source: "google" }]),
   };
 
@@ -110,10 +111,10 @@ export function buildProfile({ query, google, osm, site, hub, instagram, tripadv
   return {
     query, generatedAt: new Date().toISOString(), warnings, fields, hours,
     textHours: [...(site?.hoursText ?? [])],
-    links: { menu: links("menu"), delivery: links("delivery"), reserve: links("reserve"), waze: links("waze"), hubs: [...new Set([...(site?.links?.hubs ?? []), ...(instagram?.links ?? []).filter((l) => /linktr|beacons|bio\.link|lnk\.bio|taplink/.test(l))])] },
+    links: { menu: links("menu"), delivery: links("delivery"), reserve: links("reserve"), waze: links("waze"), hubs: [...new Set([...(site?.links?.hubs ?? []), ...(search?.hubs ?? []), ...(instagram?.links ?? []).filter((l) => /linktr|beacons|bio\.link|lnk\.bio|taplink/.test(l))])] },
     ratings: [g.rating && { source: "google", value: g.rating, count: g.ratingCount }, ld?.rating && { source: "website", ...ld.rating }, ta?.rating && { source: "tripadvisor", ...ta.rating }].filter(Boolean),
     images: { logos: [...(site?.logos ?? []), ...(hub?.logos ?? [])].filter((l) => l.url), site: site?.images ?? [], hub: hub?.images ?? [], googlePhotos: g.photos?.length ?? 0, instagramImage: instagram?.image ?? "", themeColor: site?.meta.themeColor ?? "" },
     copySources: { googleSummary: g.summary ?? "", siteDescription: site?.meta.description ?? "", instagramBio: instagram?.bio ?? "", tripadvisor: tripadvisor?.description ?? "", headings: site?.headings ?? [], paragraphs: site?.paragraphs ?? [] },
-    social: { instagram: instagram ? { handle: instagram.handle, followers: instagram.followers, posts: instagram.posts, blocked: instagram.blocked } : null },
+    social: { instagram: instagram ? { handle: instagram.handle, followers: instagram.followers, posts: instagram.posts, blocked: instagram.blocked, partial: instagram.partial, surface: instagram.surface } : null },
   };
 }

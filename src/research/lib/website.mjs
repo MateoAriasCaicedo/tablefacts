@@ -2,18 +2,8 @@
 // TripAdvisor page when it lets us in) with plain fetch and regexes: no HTML
 // parser dependency. Falls back to Playwright when a page renders client-side.
 import { loadPlaywright } from "../../lib/playwright.mjs";
-import { fetchText, sleep, BROWSER_UA } from "./util.mjs";
+import { fetchText, sleep, BROWSER_UA, decodeHtml as decode, instagramHandle } from "./util.mjs";
 import { fromOsm, fromSpec } from "./hours.mjs";
-
-const ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-const decode = (s) =>
-  s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
-    if (e[0] === "#") {
-      const n = e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1));
-      return Number.isFinite(n) ? String.fromCodePoint(n) : m;
-    }
-    return ENT[e.toLowerCase()] ?? m;
-  });
 
 const attrs = (tag) => {
   const out = {};
@@ -25,7 +15,6 @@ const abs = (u, base) => { try { return new URL(u, base).href; } catch { return 
 const strip = (s) => decode(s.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return ""; } };
 
-const IG_RESERVED = new Set(["p", "reel", "reels", "explore", "accounts", "tv", "stories", "share", "direct", "about", "legal", "web", "developer"]);
 const RESERVE = /(opentable|resy\.com|thefork|eltenedor|exploretock|sevenrooms|covermanager|quandoo|tablein|mesa247|bookatable|tablecheck|resos\.com|reservandonos|agendapro|fudo\.)/i;
 const DELIVERY = /(rappi|ubereats|pedidosya|doordash|grubhub|domicilios\.com|didi-food|glovoapp)/i;
 const HUBS = /(linktr\.ee|beacons\.ai|bio\.link|lnk\.bio|linktree\.com|taplink|campsite\.bio|solo\.to|linkin\.bio|flow\.page)/i;
@@ -102,8 +91,8 @@ export function analyzeHtml(html, base, lines = visibleLines(html)) {
       const num = (u.pathname.match(/^\/(\d{7,})/)?.[1]) ?? u.searchParams.get("phone");
       push("whatsapp", num ? num.replace(/\D/g, "") : href);
     } else if (/(^|\.)instagram\.com$/.test(h)) {
-      const handle = u.pathname.split("/")[1]?.toLowerCase();
-      if (handle && !IG_RESERVED.has(handle) && /^[a-z0-9._]+$/.test(handle)) ig.set(handle, (ig.get(handle) ?? 0) + 1);
+      const handle = instagramHandle(href);
+      if (handle) ig.set(handle, (ig.get(handle) ?? 0) + 1);
     } else if (/facebook\.com$|fb\.com$/.test(h)) push("facebook", href);
     else if (/tiktok\.com$/.test(h)) push("tiktok", href);
     else if (/tripadvisor\./.test(h)) push("tripadvisor", href);

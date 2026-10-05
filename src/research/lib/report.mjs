@@ -33,17 +33,54 @@ const ROWS = [
 
 const cell = (s) => String(s).replace(/\|/g, "\\|");
 
-export function renderReport(p, { notes, photos }) {
+// Web text lands in a file agents are told to act on: collapse newlines and
+// neutralise backticks so third-party text cannot forge headings or a code fence.
+const flat = (s) => String(s ?? "").replace(/\s+/g, " ").replace(/`/g, "'").trim();
+
+/**
+ * Splits the fields into what was discovered from a source, what was only echoed
+ * back from the user's own input, and low-confidence guesses, so a summary can
+ * say "N facts, M from your input" instead of counting all of them as found.
+ */
+export function fieldSummary(p) {
+  const held = Object.entries(p.fields ?? {}).filter(([, f]) => {
+    const v = f?.value;
+    return v !== undefined && v !== null && v !== "" && !(Array.isArray(v) && !v.length);
+  });
+  const parts = (f) => String(f.source ?? "").split(" + ").map((s) => s.trim()).filter(Boolean);
+  return {
+    discovered: held.filter(([, f]) => f.confidence !== "low" && parts(f).some((s) => s !== "you")).map(([k]) => k),
+    echoed: held.filter(([, f]) => {
+      const sources = parts(f);
+      return f.confidence !== "low" && sources.length > 0 && sources.every((s) => s === "you");
+    }).map(([k]) => k),
+    guessed: held.filter(([, f]) => f.confidence === "low").map(([k]) => k),
+  };
+}
+
+/** The CLI summary: what came from a source, what was only echoed, what was a low guess. */
+export function summaryLines(p) {
+  const { discovered, echoed, guessed } = fieldSummary(p);
+  const list = (a) => (a.length ? a.join(", ") : "none");
+  const lines = [`Found ${discovered.length} fact(s) from sources: ${list(discovered)}`];
+  if (echoed.length) lines.push(`Echoed ${echoed.length} from your input: ${list(echoed)}`);
+  if (guessed.length) lines.push(`Not counted (low-confidence guess): ${list(guessed)}`);
+  return lines;
+}
+
+export function renderReport(p, { notes, photos, kept = [] }) {
   const out = [];
   const q = p.query;
-  out.push(`# Research: ${q.name}${q.location ? `, ${q.location}` : ""}`, "", `Generated ${p.generatedAt}. Everything here is **unconfirmed**: check it with the client and copy the answers into \`BRIEF.md\`. Sources disagree often, and the confidence column says how many agreed.`, "");
+  out.push(`# Research: ${flat(q.name)}${q.location ? `, ${flat(q.location)}` : ""}`, "", `Generated ${p.generatedAt}. Everything here is **unconfirmed**: check it with the client and copy the answers into \`BRIEF.md\`. Sources disagree often, and the confidence column says how many agreed.`, "");
+  for (const k of kept) out.push(`> **Kept for a manual read:** ${k.label} (${k.url}) — could not be read (${k.reason}). Nothing was extracted from it; open it yourself.`, "");
   if (p.warnings.length) out.push("## Warnings", "", ...p.warnings.map((w) => `- ${w}`), "");
   if (notes.length) out.push("## What each source did", "", ...notes.map((n) => `- ${n}`), "");
 
   out.push("## Facts", "", "| Item | Value | Source | Confidence | Goes in |", "| --- | --- | --- | --- | --- |");
   for (const [label, key, goes] of ROWS) {
     const f = p.fields[key];
-    out.push(`| ${label} | ${f ? cell(val(f)) : "_not found_"} | ${f?.source ?? ""} | ${f?.confidence ?? ""} | ${goes} |`);
+    const confidence = f ? (f.confidence === "low" ? "low (guess)" : f.confidence) : "";
+    out.push(`| ${label} | ${f ? cell(val(f)) : "_not found_"} | ${f?.source ?? ""} | ${confidence} | ${goes} |`);
   }
   out.push("");
 
@@ -75,7 +112,12 @@ export function renderReport(p, { notes, photos }) {
   out.push("");
 
   if (p.ratings.length) out.push("## Ratings (context only)", "", ...p.ratings.map((r) => `- ${r.source}: ${r.value}${r.count ? ` (${r.count} reviews)` : ""}`), "");
-  if (p.social.instagram && !p.social.instagram.blocked) out.push(`Instagram @${p.social.instagram.handle}: ${p.social.instagram.followers} followers, ${p.social.instagram.posts} posts.`, "");
+  const ig = p.social.instagram;
+  if (ig && !ig.blocked) {
+    const counts = ig.followers || ig.posts ? `${ig.followers || "?"} followers, ${ig.posts || "?"} posts.` : "";
+    const note = ig.partial ? "Bio from a search snippet (the profile itself was walled)." : counts ? "" : "Profile card read; followers and bio are not public.";
+    out.push(`Instagram @${ig.handle}: ${[counts, note].filter(Boolean).join(" ")}`.trim(), "");
+  }
 
   out.push("## Images", "");
   out.push(`- Website images found: ${p.images.site.length}; link-in-bio: ${p.images.hub.length}; Google photos available: ${p.images.googlePhotos}.`);
@@ -86,13 +128,21 @@ export function renderReport(p, { notes, photos }) {
 
   out.push("## Material for the copy", "", "Facts and tone only. Rewrite it in the template's voice in both languages; do not paste it.", "");
   const c = p.copySources;
-  for (const [label, text] of [["Google summary", c.googleSummary], ["Site description", c.siteDescription], ["Instagram bio", c.instagramBio], ["TripAdvisor", c.tripadvisor]]) if (text) out.push(`- **${label}:** ${text}`);
-  if (c.headings.length) out.push(`- **Site headings:** ${c.headings.slice(0, 12).join(" / ")}`);
-  for (const t of c.paragraphs.slice(0, 6)) out.push(`  - ${t}`);
+  for (const [label, text] of [["Google summary", c.googleSummary], ["Site description", c.siteDescription], ["Instagram bio", c.instagramBio], ["TripAdvisor", c.tripadvisor]]) if (text) out.push(`- **${label}:** ${flat(text)}`);
+  if (c.headings.length) out.push(`- **Site headings:** ${c.headings.slice(0, 12).map(flat).join(" / ")}`);
+  for (const t of c.paragraphs.slice(0, 6)) out.push(`  - ${flat(t)}`);
   out.push("");
 
   const missing = ROWS.filter(([, key]) => !p.fields[key] && ["name", "street", "coordinates", "whatsapp", "instagram", "reserveUrl", "cuisines"].includes(key)).map(([l]) => l);
-  out.push("## Ask the client", "", ...[...missing, "Opening hours incl. holidays", "Logo as SVG and original photos", "The story, signature dishes and events", "Production domain"].filter((v, i, a) => a.indexOf(v) === i && (v !== "Opening hours incl. holidays" || true)).map((m) => `- ${m}`), "");
+  const ask = !p.fields.website && !p.fields.mapsUrl
+    ? "Send the restaurant's website or a Google Maps link — that unlocks the address, map point and place ID."
+    : !p.fields.coordinates
+      ? "A Google Maps link would pin the exact location."
+      : !p.fields.whatsapp
+        ? "Ask for the WhatsApp number taken with reservations, and confirm it accepts messages."
+        : "Ask for the current website and social profiles to cross-check the rest.";
+  const asks = ["Opening hours incl. holidays", "Logo as SVG and original photos", "The story, signature dishes and events", "Production domain"];
+  out.push("## Ask the client", "", `- **Best next question:** ${ask}`, ...[...new Set([...missing, ...asks])].map((m) => `- ${m}`), "");
   out.push("## Next", "", "```bash", `npm run setup < .tablefacts/research/${q.slug}/setup-answers.txt`, "git diff   # review before keeping it", "```", "", "Blank lines in that file keep the template's current value, so anything not found stays a placeholder.", "");
   return out.join("\n");
 }
@@ -100,19 +150,22 @@ export function renderReport(p, { notes, photos }) {
 /** One line per prompt of `data/scripts/setup.mjs`, in its order. Blank keeps the current value. */
 export function setupAnswers(p) {
   const f = p.fields;
-  const ig = f.instagram?.value;
+  // A low-confidence guess stays blank so setup keeps the template's placeholder,
+  // instead of a guess being written in as though it were a discovered fact.
+  const sure = (field) => (field && field.confidence !== "low" ? field : null);
+  const ig = sure(f.instagram)?.value;
   return [
-    val(f.name),
+    val(sure(f.name)),
     "", // production URL: the new domain, not the current website
-    f.reserveUrl?.value ?? "",
-    f.whatsapp?.display ?? "",
+    sure(f.reserveUrl)?.value ?? "",
+    sure(f.whatsapp)?.display ?? "",
     ig ? `@${ig}` : "",
-    val(f.street),
-    val(f.locality),
-    val(f.region),
-    val(f.country),
-    f.coordinates?.value?.lat ?? "",
-    f.coordinates?.value?.lng ?? "",
-    val(f.cuisines),
+    val(sure(f.street)),
+    val(sure(f.locality)),
+    val(sure(f.region)),
+    val(sure(f.country)),
+    sure(f.coordinates)?.value?.lat ?? "",
+    sure(f.coordinates)?.value?.lng ?? "",
+    val(sure(f.cuisines)),
   ].join("\n") + "\n";
 }

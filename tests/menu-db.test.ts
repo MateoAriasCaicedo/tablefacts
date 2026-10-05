@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { loadEnvFiles } from "../src/lib/env.mjs";
-import { connect, inspect, replaceMenu } from "../src/menu/lib/db.mjs";
+import { assertTarget, connect, inspect, replaceMenu } from "../src/menu/lib/db.mjs";
+import { menuTables, validateTablePrefix } from "../src/menu/lib/tables.mjs";
 
 type Anything = Record<string, any>;
 
@@ -188,5 +189,129 @@ describe("inspect", () => {
   it("says to apply the migration when the tables do not exist", async () => {
     const { client } = fakeClient(() => Object.assign(new Error("relation does not exist"), { code: "42P01" }));
     await expect(inspect(client, menu)).rejects.toThrow("The menu tables do not exist");
+  });
+});
+
+const counts = { categories: 2, sections: 3, products: 4 };
+const prefixed = (prefix: string) => (sql: string) => {
+  for (const [name, count] of Object.entries(counts)) if (sql.startsWith(`insert into public.${prefix}menu_${name}`)) return { rowCount: count };
+  return { rowCount: 0 };
+};
+
+describe("a table prefix", () => {
+  it("accepts the empty prefix (the default) and a safe <name>_ prefix", () => {
+    expect(validateTablePrefix()).toBe("");
+    expect(validateTablePrefix("")).toBe("");
+    expect(validateTablePrefix("makibar_")).toBe("makibar_");
+    expect(validateTablePrefix("cannario_rooftop_")).toBe("cannario_rooftop_");
+  });
+
+  it("rejects anything that is not a lowercase <name>_ prefix", () => {
+    for (const bad of ["x; drop table y", "Makibar_", " makibar_", "makibar", "makibar__x", "1makibar_", "makibar_ "]) {
+      const error = (() => {
+        try {
+          validateTablePrefix(bad);
+        } catch (e) {
+          return e as Anything;
+        }
+      })();
+      expect(error.code).toBe("ECONFIG");
+      expect(error.option).toBe("tablePrefix");
+      expect(error.message).toMatch(/not a valid table prefix/);
+    }
+  });
+
+  it("resolves the three table names for the prefix, and the unprefixed set by default", () => {
+    expect(menuTables("makibar_")).toEqual({
+      categories: "public.makibar_menu_categories",
+      sections: "public.makibar_menu_sections",
+      products: "public.makibar_menu_products",
+    });
+    expect(menuTables()).toEqual({ categories: "public.menu_categories", sections: "public.menu_sections", products: "public.menu_products" });
+  });
+
+  it("replaceMenu targets only the prefixed tables, never the unprefixed ones", async () => {
+    const { client, queries } = fakeClient(prefixed("makibar_"));
+    expect(await replaceMenu(client, menu, { tablePrefix: "makibar_" })).toEqual({ categories: 2, sections: 3, products: 4 });
+    expect(queries.map((q) => q.sql.split(/\s+/).slice(0, 3).join(" "))).toEqual([
+      "begin",
+      "delete from public.makibar_menu_categories",
+      "insert into public.makibar_menu_categories",
+      "insert into public.makibar_menu_sections",
+      "insert into public.makibar_menu_products",
+      "commit",
+    ]);
+    for (const q of queries) expect(q.sql).not.toMatch(/public\.menu_/);
+  });
+
+  it("replaceAll empties the prefixed categories table only", async () => {
+    const { client, queries } = fakeClient(prefixed("makibar_"));
+    await replaceMenu(client, menu, { replaceAll: true, tablePrefix: "makibar_" });
+    expect(queries[1].sql).toBe("delete from public.makibar_menu_categories");
+  });
+
+  it("inspect reads the prefixed tables", async () => {
+    const { client, queries } = fakeClient((sql) => (sql.includes("count(distinct") ? { rows: [{ categories: 1, products: 2 }] } : { rows: [] }));
+    expect(await inspect(client, menu, { tablePrefix: "makibar_" })).toEqual({ categories: 1, products: 2, kept: [] });
+    expect(queries[0].sql).toContain("from public.makibar_menu_categories");
+    expect(queries[0].sql).toContain("left join public.makibar_menu_sections");
+    expect(queries[0].sql).toContain("left join public.makibar_menu_products");
+    expect(queries[1].sql).toContain("from public.makibar_menu_categories");
+    for (const q of queries) expect(q.sql).not.toMatch(/public\.menu_/);
+  });
+});
+
+describe("assertTarget: a shared database", () => {
+  const three = (prefix: string) => ["categories", "sections", "products"].map((name) => `${prefix}menu_${name}`);
+  const existence = (present: string[]) => (sql: string) => (sql.includes("table_name = any") ? { rows: present.map((table_name) => ({ table_name })) } : { rows: [] });
+
+  it("passes when the three target tables exist, and only reads", async () => {
+    const { client, queries } = fakeClient(existence(three("makibar_")));
+    await expect(assertTarget(client, { tablePrefix: "makibar_" })).resolves.toMatchObject({ prefix: "makibar_" });
+    expect(queries).toHaveLength(1);
+    expect(queries[0].sql).toContain("information_schema.tables");
+  });
+
+  it("names the prefixed tables and the migration when one is missing", async () => {
+    const { client } = fakeClient(existence(["makibar_menu_categories", "makibar_menu_sections"]));
+    const error: Anything = await assertTarget(client, { tablePrefix: "makibar_" }).catch((e) => e);
+    expect(error.code).toBe("ECONFIG");
+    expect(error.message).toContain("Apply supabase/migrations/0001_menu.sql");
+    expect(error.message).toContain("public.makibar_menu_products");
+  });
+
+  it("stops an unprefixed import when other restaurants' tables are present", async () => {
+    const others = ["cannario_menu_categories", "makibar_menu_categories"];
+    const { client, queries } = fakeClient((sql) => (sql.includes("table_name = any") ? { rows: three("").map((table_name) => ({ table_name })) } : { rows: others.map((table_name) => ({ table_name })) }));
+    const error: Anything = await assertTarget(client, {}).catch((e) => e);
+    expect(error.code).toBe("ECONFIG");
+    expect(error.message).toContain("This database has other restaurants' menu tables (cannario_menu_categories, makibar_menu_categories)");
+    expect(error.message).toContain("--table-prefix");
+    for (const q of queries) expect(q.sql.trim().toLowerCase().startsWith("select")).toBe(true);
+  });
+
+  it("lets --allow-unprefixed through, but still refuses a whole-menu replace", async () => {
+    const others = ["makibar_menu_categories"];
+    const answer = (sql: string) => (sql.includes("table_name = any") ? { rows: three("").map((table_name) => ({ table_name })) } : { rows: others.map((table_name) => ({ table_name })) });
+    await expect(assertTarget(fakeClient(answer).client, { allowUnprefixed: true })).resolves.toMatchObject({ prefix: "", others });
+    const error: Anything = await assertTarget(fakeClient(answer).client, { allowUnprefixed: true, replaceAll: true }).catch((e) => e);
+    expect(error.code).toBe("ECONFIG");
+    expect(error.message).toContain("Refusing to replace the whole menu");
+  });
+
+  it("does not look for other restaurants' tables once a prefix is set", async () => {
+    const { client, queries } = fakeClient(existence(three("makibar_")));
+    await assertTarget(client, { tablePrefix: "makibar_" });
+    expect(queries).toHaveLength(1);
+  });
+
+  it("passes an unprefixed import when no other restaurant's tables exist", async () => {
+    const { client } = fakeClient((sql) => (sql.includes("table_name = any") ? { rows: three("").map((table_name) => ({ table_name })) } : { rows: [] }));
+    await expect(assertTarget(client, {})).resolves.toMatchObject({ prefix: "", others: [] });
+  });
+
+  it("does not mistake a name that only looks prefixed (xmenu_categories) for another restaurant", async () => {
+    const { client } = fakeClient((sql) => (sql.includes("table_name = any") ? { rows: three("").map((table_name) => ({ table_name })) } : { rows: [{ table_name: "xmenu_categories" }] }));
+    await expect(assertTarget(client, {})).resolves.toMatchObject({ others: [] });
   });
 });

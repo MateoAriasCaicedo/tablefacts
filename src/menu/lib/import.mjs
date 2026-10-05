@@ -7,8 +7,9 @@ import { resolveEnv } from "../../lib/env.mjs";
 import { optionError, TablefactsError } from "../../lib/errors.mjs";
 import { normalizeLog } from "../../lib/log.mjs";
 import { projectRoot, resolveIn } from "../../lib/project.mjs";
-import { connect, inspect, replaceMenu } from "./db.mjs";
+import { assertTarget, connect, inspect, replaceMenu } from "./db.mjs";
 import { countMenu, validateMenu } from "./menu.mjs";
+import { validateTablePrefix } from "./tables.mjs";
 
 /** Things the site needs that this menu does not give it, read from the template's own files. */
 export async function templateHints(menu, { projectDir } = {}) {
@@ -67,6 +68,9 @@ export async function importMenu({
   json,
   replaceAll = false,
   force = false,
+  tablePrefix = "",
+  allowUnprefixed = false,
+  yes = false,
   databaseUrl,
   env,
   projectDir,
@@ -74,6 +78,8 @@ export async function importMenu({
 } = {}) {
   const log = normalizeLog(logOption);
   databaseUrl ??= resolveEnv(env).SUPABASE_DB_URL;
+  // Before anything is opened: an invalid prefix must never reach the SQL builder.
+  const prefix = validateTablePrefix(tablePrefix);
   let client;
   try {
     validateMenu(menu);
@@ -98,14 +104,25 @@ export async function importMenu({
       log("\nDry run: SUPABASE_DB_URL is not set, so the database was not checked. Nothing was written.", "warn");
       return result;
     }
+    // A whole-menu replace empties every row of the target tables: it needs an explicit confirmation.
+    if (replaceAll && !yes && !dryRun) {
+      throw optionError("yes", "`replaceAll` empties every row in the target tables and needs confirmation: pass `yes`.", "EUSAGE");
+    }
 
-    const scope = { replaceAll: !!replaceAll };
+    // Only the fields that are set: this keeps the default call shape unchanged for callers and tests.
+    const scope = { replaceAll: !!replaceAll, ...(prefix ? { tablePrefix: prefix } : {}) };
+
     let label;
     ({ client, label } = await connect(databaseUrl, { env }));
+    const target = await assertTarget(client, { tablePrefix: prefix, allowUnprefixed: !!allowUnprefixed, replaceAll: !!replaceAll });
     const current = await inspect(client, menu, scope);
-    result.database = { label, current };
+    result.database = { label, tables: Object.values(target.tables), current };
     log(`\nDatabase ${label}`);
+    log(`  Target tables: ${Object.values(target.tables).join(", ")}`);
     log(`  ${scope.replaceAll ? "Replaces the whole menu" : `Replaces the categories this import writes`}: ${current.categories} categories and ${current.products} products now, ${totals.categories} and ${totals.products} after.`);
+    if (scope.replaceAll) {
+      log(`  --replace-all will empty ${target.tables.categories}, ${target.tables.sections} and ${target.tables.products} (${current.categories} categories, ${current.products} products).`, "warn");
+    }
     if (current.kept.length) log(`  Left untouched (not part of this import): ${current.kept.join(", ")}. Use \`replaceAll\` to remove them.`, "warn");
 
     if (current.products > 0 && totals.products < current.products / 2 && !force) {

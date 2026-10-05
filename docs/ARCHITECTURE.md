@@ -64,15 +64,19 @@ allowed to crash. Wrap an expected failure of an outside service (HTTP error, bl
 
 ## Research (`src/research`)
 
-`research()` in `index.mjs` runs the sources in order and writes three files:
+`research()` in `index.mjs` runs the sources in order and writes `profile.json`, `report.md`, `setup-answers.txt` (and, in the default folder, `latest.json`):
 
 1. Google Places and OpenStreetMap, in parallel (they need only the name and place).
-2. The restaurant's website (`lib/website.mjs`), from the option or from what step 1 found.
-3. Instagram, then a link-in-bio page, then TripAdvisor (`lib/social.mjs`), each from the option or a link an
-   earlier source found.
-4. `lib/merge.mjs` combines everything into `profile.fields.<name> = { value, source, confidence, alternatives? }`.
+2. When neither found a website, a key-free web search (`lib/search.mjs`) turns the bare name and place into
+   candidate links (website, Instagram, TripAdvisor, Maps) that the rest of the flow follows.
+3. The restaurant's website (`lib/website.mjs`), from the option or from what step 1 or 2 found.
+4. Instagram, then a link-in-bio page, then TripAdvisor (`lib/social.mjs`), each from the option or a link an
+   earlier source found. Instagram tries several public surfaces; TripAdvisor's URL slug yields a name and city
+   even when the page is blocked.
+5. `lib/merge.mjs` combines everything into `profile.fields.<name> = { value, source, confidence, alternatives? }`.
    It holds the **trust order per field**; two sources agreeing makes confidence `high`, one `medium`, a guess `low`.
-5. `lib/report.mjs` renders `report.md` and `setup-answers.txt`; `lib/hours.mjs` normalises opening hours.
+6. `lib/report.mjs` renders `report.md` and `setup-answers.txt`; `lib/hours.mjs` normalises opening hours. A
+   low-confidence guess is marked "low (guess)" and left blank in `setup-answers.txt`.
 
 A source that fails is a note in the report, never the end of the run (`source()` inside `research`). To add a
 source: write a reader that returns plain data, call it in `research()` through `source()`, and add its
@@ -98,8 +102,11 @@ source (cluvi | raw)  ->  menu in the shared shape  ->  lib/import.mjs: importMe
   `validateMenu` enforces it.
 - **`lib/import.mjs`** (`importMenu`) validates, logs totals, optionally saves JSON, reads the template's
   `frontend/src/content` for hints, compares with the database and refuses suspicious imports before writing.
-- **`lib/db.mjs`** talks to Postgres with `pg` (loaded only when a database is reached). `inspect()` counts what
-  would be replaced; `replaceMenu()` does the delete and bulk inserts in one transaction.
+- **`lib/tables.mjs`** resolves the restaurant's table names from its prefix (`validateTablePrefix`,
+  `menuTables`); the validated prefix is the only thing interpolated into the `db.mjs` SQL.
+- **`lib/db.mjs`** talks to Postgres with `pg` (loaded only when a database is reached). `assertTarget()`
+  refuses a shared database before any write; `inspect()` counts what would be replaced; `replaceMenu()`
+  does the delete and bulk inserts in one transaction, scoped to the restaurant's prefixed tables.
 - **`lib/run.mjs`** (`runImport`) is the shared command wrapper: common flags, `--help`, `loadEnv`, exit code.
 - **`cluvi/`**: `source.mjs` calls Cluvi's two JSON endpoints, `import.mjs` maps them through `config.mjs`.
 - **`raw/`**: `source.mjs` finds and downloads page images, `vision.mjs` has a vision model transcribe each page

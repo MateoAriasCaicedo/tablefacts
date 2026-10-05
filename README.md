@@ -4,6 +4,9 @@ Data extraction tools for restaurant sites, shared by every Cannario template. G
 place and it gathers the public facts; point it at an Instagram or TripAdvisor page and it downloads the photos;
 point it at a Cluvi menu (or pictures of a paper menu) and it loads the menu into Supabase.
 
+Research needs no key: Google Places and OpenStreetMap run first, and a key-free web search (DuckDuckGo) fills in
+candidate links when they find no place or no website, so a bare name and place still produces a useful report.
+
 Everything works two ways: as a **command line** (`tablefacts <tool>`) and as a **JavaScript library**
 (`import { research } from 'tablefacts'`). Both do the same work; the CLI is a thin layer over the functions.
 
@@ -76,8 +79,8 @@ npx tablefacts photos tripadvisor --out ./photos --dry-run <restaurant-link>
 | `--no-google` | Skip Google even if `GOOGLE_PLACES_API_KEY` is set |
 | `--out <dir>` | Output folder (default `.tablefacts/research/<slug>`; relative paths are relative to the project) |
 
-Writes `report.md`, `profile.json` and `setup-answers.txt`. Details, sources and trust rules:
-[src/research/README.md](src/research/README.md).
+Writes `report.md`, `profile.json` and `setup-answers.txt`, and keeps `latest.json` next to the `<slug>` folders
+pointing at the newest run. Details, sources and trust rules: [src/research/README.md](src/research/README.md).
 
 ### `photos instagram`
 
@@ -116,7 +119,10 @@ Both share these options (and replace the menu in Supabase unless `--dry-run`):
 | --- | --- |
 | `--dry-run` | Extract and check, show what would change, write nothing |
 | `--json <file>` | Also save the extracted menu as JSON |
-| `--replace-all` | Replace the whole menu, not only the categories in this import |
+| `--table-prefix <prefix>` | This restaurant's tables in a shared database, e.g. `makibar_` (overrides the config). Required when other restaurants' tables exist |
+| `--allow-unprefixed` | Override the shared-database check and write the unprefixed `menu_*` tables, only when this restaurant owns them |
+| `--replace-all` | Replace the whole menu, not only the categories in this import. Requires `--yes` (except with `--dry-run`) |
+| `--yes` | Confirm `--replace-all`, which empties the target tables (`<prefix>menu_categories`, `<prefix>menu_sections`, `<prefix>menu_products`) |
 | `--force` | Write even if the import has fewer than half the products it replaces |
 
 `tablefacts menu cluvi [menu-url] [--service on_table|delivery|take_away] [--lang es]`
@@ -143,7 +149,7 @@ environment win. [.env.example](.env.example) is the template.
 
 | Variable | Used by | Meaning |
 | --- | --- | --- |
-| `SUPABASE_DB_URL` | `menu cluvi`, `menu raw` | Postgres connection string (Supabase *Transaction pooler* URL, with the real password). **Bypasses row level security:** keep it in `.env`, never in a browser-exposed variable |
+| `SUPABASE_DB_URL` | `menu cluvi`, `menu raw` | Postgres connection string, with the real password. Use the **Session pooler** URL (Supabase dashboard > Connect > Session pooler): this tool holds one connection and reads `information_schema`, which the *Transaction pooler* is not meant for. **Bypasses row level security:** keep it in `.env`, never in a browser-exposed variable |
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY` | `menu raw` | Key of the vision provider that reads the pictures |
 | `MENU_VISION_PROVIDER` | `menu raw` | Provider when `--provider` is not given: `anthropic` (default), `gemini` or `groq` |
 | `GOOGLE_PLACES_API_KEY` | `research` | Optional. Enables Google Maps (Places API (New)); without it OpenStreetMap and the web pages still work |
@@ -188,7 +194,7 @@ default output folder, browser profiles, the menu transcription cache, and where
 | `research({ name, location, country, website, instagram, tripadvisor, linktree, photos, render, google, googleKey, env, out, projectDir, log })` | Gathers public facts; writes `profile.json`, `report.md`, `setup-answers.txt`. Returns `{ profile, notes, photos, outDir, files }` | `GOOGLE_PLACES_API_KEY` is optional; `render` needs Playwright |
 | `downloadInstagram({ links, file, out, profile, pages, cdp, edgeDir, viaGoogle, browser, userDataDir, headed, dryRun, debug, projectDir, log })` | Downloads post or profile photos (give `links`, `file` or `profile`). Returns `{ saved, skipped, failed: [{ item, reason }], found? }` | Playwright |
 | `downloadTripadvisor({ links, out, cdp, edgeDir, max, dryRun, debug, projectDir, log })` | Downloads a restaurant page's photos. Same result | Playwright |
-| `importMenu({ menu, notes, title, dryRun, json, replaceAll, force, databaseUrl, env, projectDir, log })` | Validates a menu and writes it to Supabase. Returns `{ totals, notes, written, dryRun, database }`, `database` being `{ label, current: { categories, products, kept } }` or `null` when it was not reached | `SUPABASE_DB_URL` unless `dryRun` |
+| `importMenu({ menu, notes, title, dryRun, json, tablePrefix, allowUnprefixed, replaceAll, yes, force, databaseUrl, env, projectDir, log })` | Validates a menu and writes it to Supabase. Returns `{ totals, notes, written, dryRun, database }`, `database` being `{ label, tables, current: { categories, products, kept } }` or `null` when it was not reached | `SUPABASE_DB_URL` unless `dryRun` |
 | `importCluvi({ url, service, lang, config, ...importMenu options })` | Reads a Cluvi menu, then `importMenu` | `SUPABASE_DB_URL` unless `dryRun` |
 | `importImageMenu({ urls, only, provider, model, minWidth, refresh, apiKey, config, ...importMenu options })` | Transcribes menu pictures with a vision model, then `importMenu` | A vision key (see [Configuration](#configuration)) |
 | `listMenuImages({ urls, only, minWidth, config })` | Lists the menu pictures found on pages (numbered as `--list` shows) | none |
@@ -255,7 +261,7 @@ folder tablefacts is installed in, so one install serves every template.
 | What | Where |
 | --- | --- |
 | `.env` | `<project>/.env`, then `<project>/data/.env` (older templates) |
-| Research output | `<project>/.tablefacts/research/<slug>/` |
+| Research output | `<project>/.tablefacts/research/<slug>/`, with `latest.json` next to the folders |
 | Menu transcription cache and downloaded page images | `<project>/.tablefacts/cache/<host>/` |
 | Fallback browser profile | `<project>/.tablefacts/instagram-profile` |
 | Photos | The `--out` folder you give |
@@ -266,7 +272,7 @@ hosts) are read from the template's `frontend/src/content` and skipped silently 
 
 ### Supabase tables
 
-`menu cluvi` and `menu raw` write to these tables, which your project must already have (the Cannario
+`menu cluvi` and `menu raw` write to three tables, which your project must already have (the Cannario
 templates ship the migration `supabase/migrations/0001_menu.sql`):
 
 | Table | Columns written |
@@ -275,9 +281,31 @@ templates ship the migration `supabase/migrations/0001_menu.sql`):
 | `public.menu_sections` | `id` (uuid), `category_id`, `name`, `sort_order` |
 | `public.menu_products` | `section_id`, `name`, `description`, `price` (numeric), `currency`, `image_url`, `recommended`, `sort_order` |
 
+**Several restaurants can share one Supabase database.** Each restaurant then keeps its own prefixed copies
+of those three tables — `cannario_menu_categories`, `cannario_menu_sections`, `cannario_menu_products`, and
+likewise `mombasa_menu_*` and `makibar_menu_*` — while the unprefixed `menu_*` tables belong to a single,
+older site. Set the restaurant's prefix in its `config.mjs` (`tablePrefix: "makibar_"`) or pass
+`--table-prefix makibar_`; the flag overrides the config. The prefix must be lowercase letters, digits and
+underscores ending in `_`, or empty.
+
+Before it writes anything, the importer **checks which menu tables exist**:
+
+- all three target tables must exist, or it stops and names the ones missing (apply the migration);
+- with **no prefix**, it lists every `public` table ending in `_menu_categories`. If another restaurant's
+  prefixed set exists, it stops with `ECONFIG` and names those tables, so an import cannot silently write
+  into the wrong site. `--allow-unprefixed` overrides that check, and is only correct when this restaurant
+  really owns the unprefixed tables.
+
 The write is **one transaction** and replaces only the categories in the import (their sections and products go
-with them), so re-running never duplicates. `--replace-all` empties the whole menu first. An import with no
-products, or with under half the products it replaces, is refused unless `--force`. Always run `--dry-run` first.
+with them), so re-running never duplicates. The run prints the resolved target tables and the row counts it
+would delete. `--replace-all` empties the whole menu and is refused without `--yes`; it also names the exact
+tables it will empty, and never runs on the unprefixed tables while another restaurant's tables are present.
+An import with no products, or with under half the products it replaces, is refused unless `--force`. Always
+run `--dry-run` first: it runs the same checks and prints what would be written without opening a write
+transaction (only `select`s are sent).
+
+The full model — prefix rules, every check, the error codes and how to migrate a restaurant to its own prefixed
+tables — is in [docs/MENU_TABLE_PREFIX.md](docs/MENU_TABLE_PREFIX.md).
 
 ## Limits
 

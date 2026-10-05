@@ -8,6 +8,28 @@ export const BROWSER_UA =
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const HTML_ENT = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+/** Decodes the HTML entities a page's attributes or text may hold, named and numeric. */
+export const decodeHtml = (s) => String(s).replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e) => {
+  if (e[0] === "#") {
+    const n = e[1].toLowerCase() === "x" ? parseInt(e.slice(2), 16) : Number(e.slice(1));
+    return Number.isFinite(n) ? String.fromCodePoint(n) : m;
+  }
+  return HTML_ENT[e.toLowerCase()] ?? m;
+});
+
+// Instagram paths that are not a profile.
+export const IG_RESERVED = new Set(["p", "reel", "reels", "explore", "accounts", "tv", "stories", "share", "direct", "about", "legal", "web", "developer"]);
+
+/** The profile handle in an instagram.com URL, or "" for a post, reel or other non-profile path. */
+export const instagramHandle = (url) => {
+  try {
+    const h = new URL(url).pathname.split("/")[1]?.toLowerCase();
+    return h && !IG_RESERVED.has(h) && /^[a-z0-9._]+$/.test(h) ? h : "";
+  } catch { return ""; }
+};
+
 /** Runs `fn(item, index)` over `items` with at most `size` in flight; results keep the order of `items`. */
 export async function mapPool(items, size, fn) {
   const results = new Array(items.length);

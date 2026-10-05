@@ -11,11 +11,13 @@ type Anything = Record<string, any>;
 const db = vi.hoisted(() => ({
   end: vi.fn(async () => {}),
   connect: vi.fn(),
+  assertTarget: vi.fn(),
   inspect: vi.fn(),
   replaceMenu: vi.fn(),
 }));
 vi.mock("../src/menu/lib/db.mjs", () => ({
   connect: db.connect,
+  assertTarget: db.assertTarget,
   inspect: db.inspect,
   replaceMenu: db.replaceMenu,
 }));
@@ -47,6 +49,11 @@ beforeEach(() => {
   vi.stubEnv("SUPABASE_DB_URL", "");
   db.end.mockClear();
   db.connect.mockReset().mockResolvedValue({ client: { end: db.end }, label: "db.example:5432/postgres" });
+  db.assertTarget.mockReset().mockResolvedValue({
+    prefix: "",
+    tables: { categories: "public.menu_categories", sections: "public.menu_sections", products: "public.menu_products" },
+    others: [],
+  });
   db.inspect.mockReset().mockResolvedValue({ categories: 2, products: 3, kept: [] });
   db.replaceMenu.mockReset().mockResolvedValue({ categories: 2, sections: 2, products: 3 });
   process.exitCode = undefined;
@@ -223,5 +230,41 @@ describe("runImport: the database", () => {
   it("leaves no JSON file behind when nothing asked for one", async () => {
     await run(["--dry-run"]);
     expect(existsSync(join(tmpdir(), "menu.json"))).toBe(false);
+  });
+});
+
+describe("runImport: table prefix and confirmation", () => {
+  it("passes --table-prefix, --allow-unprefixed and --yes to importMenu", async () => {
+    vi.stubEnv("SUPABASE_DB_URL", "postgres://x");
+    await run(["--table-prefix", "makibar_", "--allow-unprefixed", "--yes"]);
+    expect(db.assertTarget).toHaveBeenCalledWith(expect.anything(), { tablePrefix: "makibar_", allowUnprefixed: true, replaceAll: false });
+    expect(db.inspect).toHaveBeenCalledWith(expect.anything(), menu, { replaceAll: false, tablePrefix: "makibar_" });
+    expect(db.replaceMenu).toHaveBeenCalledWith(expect.anything(), menu, { replaceAll: false, tablePrefix: "makibar_" });
+  });
+
+  it("uses the source config's prefix when --table-prefix is not given", async () => {
+    vi.stubEnv("SUPABASE_DB_URL", "postgres://x");
+    await run([], async () => ({ menu, notes: [], title: "T", tablePrefix: "cannario_" }));
+    expect(db.replaceMenu).toHaveBeenCalledWith(expect.anything(), menu, { replaceAll: false, tablePrefix: "cannario_" });
+  });
+
+  it("--table-prefix overrides the source config's prefix", async () => {
+    vi.stubEnv("SUPABASE_DB_URL", "postgres://x");
+    await run(["--table-prefix", "makibar_"], async () => ({ menu, notes: [], title: "T", tablePrefix: "cannario_" }));
+    expect(db.replaceMenu).toHaveBeenCalledWith(expect.anything(), menu, { replaceAll: false, tablePrefix: "makibar_" });
+  });
+
+  it('--table-prefix "" forces the unprefixed tables even when the config sets a prefix', async () => {
+    vi.stubEnv("SUPABASE_DB_URL", "postgres://x");
+    await run(["--table-prefix", ""], async () => ({ menu, notes: [], title: "T", tablePrefix: "cannario_" }));
+    expect(db.replaceMenu).toHaveBeenCalledWith(expect.anything(), menu, { replaceAll: false });
+    expect(db.assertTarget).toHaveBeenCalledWith(expect.anything(), { tablePrefix: "", allowUnprefixed: false, replaceAll: false });
+  });
+
+  it("documents the new flags in --help", async () => {
+    const result = await run(["--help"]);
+    expect(result.out).toContain("--table-prefix");
+    expect(result.out).toContain("--allow-unprefixed");
+    expect(result.out).toContain("--yes");
   });
 });

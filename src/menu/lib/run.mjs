@@ -12,6 +12,9 @@ export const menuFlags = {
   provider: "--provider",
   model: "--model",
   minWidth: "--min-width",
+  tablePrefix: "--table-prefix <prefix>",
+  allowUnprefixed: "--allow-unprefixed",
+  yes: "--yes",
   replaceAll: "--replace-all",
   force: "--force",
   dryRun: "--dry-run",
@@ -34,7 +37,10 @@ const commonOptions = `
 Options:
   --dry-run       extract and check, show what would change, write nothing
   --json <file>   also save the extracted menu as JSON
+  --table-prefix <prefix>  this restaurant's table prefix (e.g. makibar_); overrides the config
+  --allow-unprefixed       write the unprefixed menu_* tables on a single-restaurant database
   --replace-all   replace the whole menu, not only the categories in this import
+  --yes           confirm --replace-all (it empties the target tables)
   --force         write even if the import has far fewer products than it replaces
   -h, --help      show this help
 
@@ -54,7 +60,10 @@ export async function runImport({ usage, options = {}, fetchMenu }) {
       options: {
         "dry-run": { type: "boolean" },
         json: { type: "string" },
+        "table-prefix": { type: "string" },
+        "allow-unprefixed": { type: "boolean" },
         "replace-all": { type: "boolean" },
+        yes: { type: "boolean" },
         force: { type: "boolean" },
         help: { type: "boolean", short: "h" },
         ...options,
@@ -67,12 +76,18 @@ export async function runImport({ usage, options = {}, fetchMenu }) {
 
     loadEnv();
     const fetched = await fetchMenu({ values, positionals });
+    // `tablePrefix` is only passed when the flag is given, so it overrides the source's config
+    // instead of replacing it with undefined.
+    const overrides = values["table-prefix"] === undefined ? {} : { tablePrefix: values["table-prefix"] };
     await importMenu({
       ...fetched,
       dryRun: !!values["dry-run"],
       json: values.json,
       replaceAll: !!values["replace-all"],
       force: !!values.force,
+      allowUnprefixed: !!values["allow-unprefixed"],
+      yes: !!values.yes,
+      ...overrides,
       log: cliLog,
     });
   } catch (error) {

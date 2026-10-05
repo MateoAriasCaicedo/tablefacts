@@ -22,26 +22,50 @@ await importCluvi({
 const pictures = await listMenuImages({ urls: ['https://example.com/carta'], config: { currency: 'COP' } })
 ```
 
-- **Cluvi `config`**: `{ url?, categories: [{ slug, name, from[] }], sections: { 'Cluvi subcategory': 'SECTION NAME' } }`.
-- **Picture `config`**: `{ url?, currency, thousands, decimal, scale, categories: [{ slug, name, groups: ['food' | 'drink'] }], placeIn, sections, skipSections }`. `currency` is required.
-- **Options every import takes**: `dryRun`, `json` (relative paths resolve against `projectDir`), `replaceAll`, `force`, `databaseUrl` (default `env.SUPABASE_DB_URL`), `env`, `projectDir` and `log(message, level)` (`'info'`, `'warn'` for notes, `'error'`).
-- **Result**: `{ totals, notes, written, dryRun, database }`; `database` is `{ label, current: { categories, products, kept } }` once the database was inspected, and `null` when it was not reached (a dry run without a URL).
-- **Errors** are `TablefactsError`: `ECONFIG` (no URL, unknown provider, no key, bad currency), `EFAILED` (invalid menu, no products, import refused without `force`), `EUSAGE` (bad `only`). `err.option` names the option; the CLI shows the flag (`--force`, `--only`) and exits `2` for `EUSAGE`, `1` otherwise.
+- **Cluvi `config`**: `{ tablePrefix?, url?, categories: [{ slug, name, from[] }], sections: { 'Cluvi subcategory': 'SECTION NAME' } }`.
+- **Picture `config`**: `{ tablePrefix?, url?, currency, thousands, decimal, scale, categories: [{ slug, name, groups: ['food' | 'drink'] }], placeIn, sections, skipSections }`. `currency` is required.
+- **Options every import takes**: `dryRun`, `json` (relative paths resolve against `projectDir`), `tablePrefix` (overrides the config's; the restaurant's table set on a shared database), `allowUnprefixed` (override the shared-database check and write the unprefixed `menu_*` tables, only when this restaurant owns them), `replaceAll`, `yes` (confirms a whole-menu `replaceAll`), `force`, `databaseUrl` (default `env.SUPABASE_DB_URL`), `env`, `projectDir` and `log(message, level)` (`'info'`, `'warn'` for notes, `'error'`).
+- **Result**: `{ totals, notes, written, dryRun, database }`; `database` is `{ label, tables, current: { categories, products, kept } }` once the database was inspected, and `null` when it was not reached (a dry run without a URL).
+- **Errors** are `TablefactsError`: `ECONFIG` (no URL, unknown provider, no key, bad currency, a bad `tablePrefix`, another restaurant's tables on an unprefixed import), `EFAILED` (invalid menu, no products, import refused without `force`), `EUSAGE` (bad `only`, `replaceAll` without `yes`). `err.option` names the option; the CLI shows the flag (`--force`, `--only`) and exits `2` for `EUSAGE`, `1` otherwise.
 
 ## Setup
 
 1. Install the package in the project (`npm install --save-dev tablefacts`); it brings `pg`. Run the commands from the project's folder.
 2. Apply the migration to your Supabase project.
-3. `cp .env.example .env` and set `SUPABASE_DB_URL` to the pooler URL from the Supabase dashboard (Connect > Transaction pooler), with the real password.
+3. `cp .env.example .env` and set `SUPABASE_DB_URL` to the pooler URL from the Supabase dashboard (Connect > **Session pooler**), with the real password. Use the Session pooler, not the Transaction pooler: the importer holds one connection and reads `information_schema`. On a shared database, also set `tablePrefix` in the source's `config.mjs` (below).
 
 `SUPABASE_DB_URL` bypasses row level security. It stays in `.env` (git-ignored). Never copy it into a browser-exposed variable (such as `NEXT_PUBLIC_*`): the site only uses the publishable key.
+
+## Shared database
+
+Several restaurants can live in one Supabase project. Each then owns prefixed tables — `cannario_menu_*`,
+`mombasa_menu_*`, `makibar_menu_*` — and the unprefixed `menu_*` tables belong to a different, older site.
+Set the restaurant's `tablePrefix` in its `config.mjs`, or pass `--table-prefix <prefix>` for one run (the
+flag wins). The prefix may be empty, or lowercase letters, digits and underscores ending in `_`.
+
+Before any write the importer:
+
+- checks all three prefixed tables exist, or stops naming the missing ones and the migration to apply;
+- with **no prefix**, lists the `public` tables ending in `_menu_categories` and, if another restaurant's set
+  is there, stops with an `ECONFIG` error that names them — rather than guessing which tables are yours.
+  `--allow-unprefixed` overrides that check only when this restaurant owns the unprefixed tables;
+- prints the resolved table names and the row counts it would delete, and refuses `--replace-all` without
+  `--yes`. A whole-menu replace never runs on the unprefixed tables while another restaurant's tables exist.
+
+`--dry-run` runs all of these checks and prints what would be written, but only sends `select`s (no `begin`).
+
+The full model — prefix rules, every check, the error codes and a migration checklist — is in
+[docs/MENU_TABLE_PREFIX.md](../../docs/MENU_TABLE_PREFIX.md).
 
 ## Run (Cluvi)
 
 ```bash
-tablefacts menu cluvi --dry-run        # extract and check, show what would change, write nothing
-tablefacts menu cluvi                     # replace the menu in Supabase
-tablefacts menu cluvi <menu-url>       # another restaurant
+tablefacts menu cluvi --dry-run                     # extract and check, show what would change, write nothing
+tablefacts menu cluvi                               # replace this restaurant's menu in Supabase
+tablefacts menu cluvi <menu-url>                    # another restaurant
+tablefacts menu cluvi --table-prefix makibar_       # override the config's table prefix for one run
+tablefacts menu cluvi --replace-all --yes           # empty this restaurant's tables first, then write
+tablefacts menu cluvi --allow-unprefixed            # the unprefixed menu_* tables (single-restaurant database only)
 tablefacts menu cluvi --help
 ```
 
@@ -64,8 +88,10 @@ tablefacts menu raw --list                 # show the pictures found; no key nee
 tablefacts menu raw --dry-run              # read the pages, show the menu and the checks, write nothing
 tablefacts menu raw --only 3,9 --dry-run   # try two pages first
 tablefacts menu raw --provider gemini --dry-run   # the same, read by Gemini
-tablefacts menu raw                           # replace the menu in Supabase
+tablefacts menu raw                           # replace this restaurant's menu in Supabase
 tablefacts menu raw <page-or-image-url>... # another restaurant
+tablefacts menu raw --table-prefix makibar_ # override the config's table prefix for one run
+tablefacts menu raw --replace-all --yes     # empty this restaurant's tables first, then write
 ```
 
 Edit `raw/config.mjs` first: the URL, the currency, how the menu prints prices (`$95.000` is `thousands: "."`, `decimal: ","`) and which category each section goes to.
@@ -81,7 +107,7 @@ Edit `raw/config.mjs` first: the URL, the currency, how the menu prints prices (
 ## What it does (Cluvi)
 
 - Cluvi main category > site category, subcategory > section (name in UPPERCASE), product > product. Products keep the order Cluvi shows (its `order` field). Cluvi's "important" flag is `recommended`. Descriptions are converted from HTML to text.
-- The write is one transaction. By default only the categories in the import are replaced (their sections and products with them), so re-running never duplicates. `--replace-all` replaces the whole menu, which also removes the template's sample categories.
+- The write is one transaction. By default only the categories in the import are replaced (their sections and products with them), so re-running never duplicates. `--replace-all` empties the whole menu first, which also removes the template's sample categories; it needs `--yes` and is refused when it would empty the unprefixed tables on a shared database.
 - It refuses an import with no products, or with under half the products it replaces (`--force` overrides), so a broken extraction cannot empty the menu.
 - Photos stay on Cluvi's CDN: `image_url` holds the Cluvi URL, and your site must allow `images.cluvi.com` and `images-mini.cluvi.com` as image hosts (a template with `menuImageHosts` in `frontend/src/content/site.ts` gets a warning from the run when they are missing). If the restaurant leaves Cluvi, the photos must be re-hosted (Supabase Storage needs a different credential than the DB URL).
 

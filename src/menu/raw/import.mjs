@@ -85,6 +85,8 @@ export async function fetchImageMenu({ urls = [], only, provider, model, minWidt
     menu,
     notes,
     title: `Image menu: ${chosen.length} pages from ${host} (${reading} read with ${providers[provider].label} ${model}, ${chosen.length - reading} from the saved transcriptions), prices in ${currency}`,
+    // The restaurant's own table set, so a shared database is never touched by accident.
+    tablePrefix: config.tablePrefix,
   };
 }
 
@@ -93,7 +95,8 @@ export async function fetchImageMenu({ urls = [], only, provider, model, minWidt
  * @param {import('../../lib/types.mjs').ImportImageMenuOptions} [options]
  * @returns {Promise<import('../../lib/types.mjs').ImportResult>}
  */
-export async function importImageMenu({ urls, only, provider, model, minWidth, refresh, apiKey, env, config, ...importOptions } = {}) {
+export async function importImageMenu({ urls, only, provider, model, minWidth, refresh, apiKey, env, config = defaultConfig, ...importOptions } = {}) {
   const fetched = await fetchImageMenu({ urls, only, provider, model, minWidth, refresh, apiKey, env, config, projectDir: importOptions.projectDir, log: importOptions.log });
-  return importMenu({ ...fetched, ...importOptions, env });
+  // An explicit `tablePrefix` (or the CLI's --table-prefix) wins over the config's.
+  return importMenu({ ...fetched, ...importOptions, tablePrefix: importOptions.tablePrefix ?? config.tablePrefix, env });
 }

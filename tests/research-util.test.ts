@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as mod1 from "../src/research/lib/util.mjs";
-const { BROWSER_UA, digits, fetchText, fold, km, samePhone, sameText, sleep, slugify, tokens } = mod1 as Record<string, any>;
+const { BROWSER_UA, decodeHtml, digits, fetchText, fold, instagramHandle, km, samePhone, sameText, sleep, slugify, tokens } = mod1 as Record<string, any>;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -140,5 +140,33 @@ describe("fetchText", () => {
     expect(init.headers.accept).toBe("application/json");
     expect(init.headers["accept-language"]).toContain("es");
     expect(init.redirect).toBe("follow");
+  });
+});
+
+describe("decodeHtml", () => {
+  it("decodes named and numeric entities, including a surrogate pair", () => {
+    expect(decodeHtml("Caf&#233; &amp; Co &#x1F600; &quot;x&quot;")).toBe('Café & Co 😀 "x"');
+  });
+
+  it("leaves an unknown or malformed entity alone", () => {
+    expect(decodeHtml("a &bogus; b &#; c &")).toBe("a &bogus; b &#; c &");
+  });
+});
+
+describe("instagramHandle", () => {
+  it("reads a profile handle, accent-free or with a query string", () => {
+    expect(instagramHandle("https://www.instagram.com/casa_gaucho/")).toBe("casa_gaucho");
+    expect(instagramHandle("https://instagram.com/Casa.Gaucho?hl=es")).toBe("casa.gaucho");
+  });
+
+  it("rejects a post, a reel and reserved paths", () => {
+    for (const path of ["p/ABC", "reel/ABC", "reels/ABC", "explore/tags/food", "stories/x", "share/x"]) {
+      expect(instagramHandle(`https://www.instagram.com/${path}/`)).toBe("");
+    }
+  });
+
+  it("is empty for something that is not a URL", () => {
+    expect(instagramHandle("not a url")).toBe("");
+    expect(instagramHandle("")).toBe("");
   });
 });

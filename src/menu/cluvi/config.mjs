@@ -1,6 +1,12 @@
 // Everything restaurant-specific about the Cluvi import. Edit this file, not
 // source.mjs, when the menu is organised differently.
 export default {
+  // This restaurant's tables in a shared Supabase database: the import writes
+  // public.cannario_menu_categories / _menu_sections / _menu_products. Change
+  // it (or pass `--table-prefix`) when importing another restaurant; leave it
+  // empty only when this restaurant owns the unprefixed menu_* tables.
+  tablePrefix: "cannario_",
+
   // Any page of the restaurant's Cluvi menu. Only the first path segment is
   // used (the supplier, here "cannario"). `tablefacts menu cluvi <url>`
   // overrides it for one run.

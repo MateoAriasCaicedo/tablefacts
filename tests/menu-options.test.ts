@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const db = vi.hoisted(() => ({ end: vi.fn(async () => {}), connect: vi.fn(), inspect: vi.fn(), replaceMenu: vi.fn() }));
-vi.mock("../src/menu/lib/db.mjs", () => ({ connect: db.connect, inspect: db.inspect, replaceMenu: db.replaceMenu }));
+const db = vi.hoisted(() => ({ end: vi.fn(async () => {}), connect: vi.fn(), assertTarget: vi.fn(), inspect: vi.fn(), replaceMenu: vi.fn() }));
+vi.mock("../src/menu/lib/db.mjs", () => ({ connect: db.connect, assertTarget: db.assertTarget, inspect: db.inspect, replaceMenu: db.replaceMenu }));
 
 import { importImageMenu, importMenu, listMenuImages } from "../src/menu/index.mjs";
 import { cliLog, flagText } from "../src/menu/lib/run.mjs";
@@ -25,6 +25,11 @@ beforeEach(() => {
   vi.stubEnv("SUPABASE_DB_URL", "");
   vi.stubEnv("MENU_VISION_PROVIDER", "");
   db.connect.mockReset().mockResolvedValue({ client: { end: db.end }, label: "db.example:5432/postgres" });
+  db.assertTarget.mockReset().mockResolvedValue({
+    prefix: "",
+    tables: { categories: "public.menu_categories", sections: "public.menu_sections", products: "public.menu_products" },
+    others: [],
+  });
   db.inspect.mockReset().mockResolvedValue({ categories: 1, products: 2, kept: [] });
   db.replaceMenu.mockReset().mockResolvedValue({ categories: 1, sections: 1, products: 2 });
 });

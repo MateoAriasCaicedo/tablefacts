@@ -5,7 +5,7 @@ const { downloadPhotos, searchGoogle } = mod1 as Record<string, any>;
 import * as mod2 from "../src/research/lib/osm.mjs";
 const { searchOsm } = mod2 as Record<string, any>;
 import * as mod3 from "../src/research/lib/social.mjs";
-const { readHub, readInstagram, readTripadvisor } = mod3 as Record<string, any>;
+const { readHub, readInstagram, readTripadvisor, parseTripadvisorUrl } = mod3 as Record<string, any>;
 import * as mod4 from "../src/research/lib/website.mjs";
 const { analyzeHtml, readPage, scrapeSite } = mod4 as Record<string, any>;
 
@@ -414,7 +414,16 @@ describe("readInstagram", () => {
 
   it("reports a login wall when the page has no public metadata", async () => {
     network({ "https://www.instagram.com/": { body: "<html></html>" } });
-    expect(await readInstagram("x")).toMatchObject({ blocked: "login wall (no public metadata)" });
+    expect(await readInstagram("x")).toMatchObject({ blocked: "login wall (no public metadata on any surface)" });
+  });
+
+  it("decodes numeric entities in the share card title", async () => {
+    network({
+      "https://www.instagram.com/": {
+        body: card("1,234 Followers, 56 Following, 789 Posts - MAKI BAR (@makibar.col) on Instagram", "MAKI BAR | SUSHI (&#064;makibar.col) &#x2022; Fotos"),
+      },
+    });
+    expect(await readInstagram("makibar")).toMatchObject({ displayName: "MAKI BAR | SUSHI" });
   });
 
   it("reports an HTTP error and a network error as 'blocked'", async () => {
@@ -422,6 +431,77 @@ describe("readInstagram", () => {
     expect(await readInstagram("x")).toMatchObject({ blocked: "HTTP 429" });
     network({ "https://www.instagram.com/": new Error("socket hang up") });
     expect(await readInstagram("x")).toMatchObject({ blocked: "socket hang up" });
+  });
+
+  it("reads the public web profile API when the share card is walled", async () => {
+    network({
+      "https://www.instagram.com/api/v1/users/web_profile_info/": {
+        json: { data: { user: { full_name: "Maki Bar", biography: "Sushi en Medellín. Reservas +57 300 111 2233", edge_followed_by: { count: 1200 }, edge_owner_to_timeline_media: { count: 88 }, profile_pic_url_hd: "https://cdn/x.jpg" } } },
+      },
+    });
+    expect(await readInstagram("makibar")).toMatchObject({
+      surface: "profile API",
+      displayName: "Maki Bar",
+      followers: "1200",
+      posts: "88",
+      phones: ["+57 300 111 2233"],
+      image: "https://cdn/x.jpg",
+    });
+  });
+
+  it("never impersonates a crawler: a walled profile stays blocked", async () => {
+    const seen: (string | undefined)[] = [];
+    vi.stubGlobal("fetch", async (input: any, init: any) => {
+      seen.push(init?.headers?.["user-agent"]);
+      return { ok: true, status: 200, url: String(input), headers: { get: () => "text/html" }, text: async () => "<html></html>", body: null };
+    });
+    const result = await readInstagram("makibar");
+    expect(result.blocked).toContain("login wall");
+    expect(seen.every((ua) => ua === undefined || /cannario-research/.test(ua))).toBe(true);
+  });
+
+  it("reads oEmbed and keeps the requested handle, not the display name", async () => {
+    network({ "https://api.instagram.com/oembed/": { json: { author_name: "Maki Bar", title: "Maki Bar on Instagram" } } });
+    expect(await readInstagram("makibar")).toMatchObject({ handle: "makibar", surface: "oembed", displayName: "Maki Bar" });
+  });
+
+  it("fills a missing bio and counts from the search snippet when a surface answered without them", async () => {
+    network({ "https://api.instagram.com/oembed/": { json: { author_name: "Maki Bar", title: "x" } } });
+    const result = await readInstagram("makibar", { snippet: '1,200 Followers, 56 Following, 789 Posts - Maki Bar (@makibar.col) on Instagram: "Sushi en Medellín."' });
+    expect(result).toMatchObject({ surface: "oembed", handle: "makibar", followers: "1,200", posts: "789", bio: "Sushi en Medellín." });
+  });
+
+  it("falls back to the bio a search engine indexed", async () => {
+    network({ "https://www.instagram.com/": { status: 404 } });
+    expect(await readInstagram("makibar", { snippet: "Sushi en Medellín. Reservas +57 300 111 2233" })).toMatchObject({
+      surface: "search snippet",
+      partial: true,
+      bio: "Sushi en Medellín. Reservas +57 300 111 2233",
+      phones: ["+57 300 111 2233"],
+    });
+  });
+});
+
+describe("parseTripadvisorUrl", () => {
+  it("reads the restaurant name and the location hint out of the slug", () => {
+    expect(parseTripadvisorUrl("https://www.tripadvisor.co/Restaurant_Review-g297478-d34088296-Reviews-Maki_Bar_Medellin-Medellin_Antioquia_Department.html"))
+      .toEqual({ name: "Maki Bar Medellin", location: "Medellin Antioquia Department" });
+  });
+
+  it("keeps a multi-word city whole instead of truncating it", () => {
+    expect(parseTripadvisorUrl("https://www.tripadvisor.com/Restaurant_Review-g1-d2-Reviews-Gaucho-Buenos_Aires_Capital_Federal_District.html"))
+      .toEqual({ name: "Gaucho", location: "Buenos Aires Capital Federal District" });
+  });
+
+  it("has nothing for a URL that is not a restaurant page", () => {
+    expect(parseTripadvisorUrl("https://www.tripadvisor.com/")).toBeNull();
+    expect(parseTripadvisorUrl("not a url")).toBeNull();
+  });
+
+  it("keeps the slug even when the page is bot-blocked", async () => {
+    network({ "https://www.tripadvisor.co/Restaurant_Review": { body: `<html><body><p>${"Please verify you are human. ".repeat(12)}</p></body></html>` } });
+    const result = await readTripadvisor("https://www.tripadvisor.co/Restaurant_Review-g1-d2-Reviews-Maki_Bar_Medellin-Medellin.html");
+    expect(result).toMatchObject({ blocked: expect.stringContaining("bot protection"), slug: { name: "Maki Bar Medellin", location: "Medellin" } });
   });
 });
 
@@ -447,7 +527,7 @@ describe("readTripadvisor and readHub", () => {
 
   it("passes on an HTTP error", async () => {
     network({ "https://www.tripadvisor.com/r": { status: 404 } });
-    expect(await readTripadvisor("https://www.tripadvisor.com/r")).toEqual({ url: "https://www.tripadvisor.com/r", blocked: "HTTP 404" });
+    expect(await readTripadvisor("https://www.tripadvisor.com/r")).toEqual({ url: "https://www.tripadvisor.com/r", slug: null, blocked: "HTTP 404" });
   });
 
   it("reads a link-in-bio hub's links", async () => {

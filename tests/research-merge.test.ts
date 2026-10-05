@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildProfile } from "../src/research/lib/merge.mjs";
-import { renderReport, setupAnswers } from "../src/research/lib/report.mjs";
+import { fieldSummary, renderReport, setupAnswers, summaryLines } from "../src/research/lib/report.mjs";
 
 /* The sources are loosely typed on purpose: each test passes only what it
    needs, as the real run does when a source finds nothing. */
@@ -96,6 +96,87 @@ describe("buildProfile fields", () => {
   it("collects Instagram handles by how often the site links them", () => {
     const { fields } = build({ site: site({ links: links({ instagram: ["casa_gaucho", "other"] }) }) });
     expect(fields.instagram).toMatchObject({ value: "casa_gaucho", source: "website" });
+  });
+});
+
+describe("buildProfile web search", () => {
+  const search = {
+    website: "https://makibar.co/?utm_source=x", instagram: "makibar.col", tripadvisor: "https://www.tripadvisor.co/x",
+    facebook: "https://facebook.com/makibar", tiktok: "https://tiktok.com/@makibar", mapsUrl: "https://maps.app.goo.gl/abc",
+  };
+
+  it("uses the links a web search found when nothing else did", () => {
+    const { fields } = build({ search });
+    expect(fields.website).toMatchObject({ value: "https://makibar.co", source: "search" });
+    expect(fields.instagram).toMatchObject({ value: "makibar.col", source: "search" });
+    expect(fields.tripadvisor).toMatchObject({ value: "https://www.tripadvisor.co/x", source: "search" });
+    expect(fields.facebook).toMatchObject({ source: "search" });
+    expect(fields.tiktok).toMatchObject({ source: "search" });
+    expect(fields.mapsUrl).toMatchObject({ source: "search" });
+  });
+
+  it("keeps a TripAdvisor URL slug name only as a low-confidence guess", () => {
+    const { fields } = build({ tripadvisor: { slug: { name: "Maki Bar Medellin", location: "Medellin Antioquia Department" } } });
+    expect(fields.name).toMatchObject({ value: "Maki Bar Medellin", source: "tripadvisor (URL)", confidence: "low" });
+    expect(fields.locality).toBeNull();
+  });
+
+  it("adds the hub links a web search found", () => {
+    const { links: out } = build({ search: { hubs: ["https://linktr.ee/makibar"] } });
+    expect(out.hubs).toEqual(["https://linktr.ee/makibar"]);
+  });
+
+  it("prefers Google and the website over a web-search link", () => {
+    const { fields } = build({ google: google({ website: "https://gaucho.co" }), search: { website: "https://other.example" } });
+    expect(fields.website).toMatchObject({ value: "https://gaucho.co", source: "google" });
+  });
+
+  it("lets a user-supplied TripAdvisor link win over a search one", () => {
+    const { fields } = build({ query: { ...query, tripadvisor: "https://www.tripadvisor.com/mine" }, search: { tripadvisor: "https://www.tripadvisor.com/search" } });
+    expect(fields.tripadvisor).toMatchObject({ value: "https://www.tripadvisor.com/mine", source: "you" });
+  });
+
+  it("carries the Instagram surface and partial flag into the profile", () => {
+    const { social } = build({ instagram: { handle: "x", partial: true, surface: "search snippet", followers: "", posts: "" } });
+    expect(social.instagram).toMatchObject({ partial: true, surface: "search snippet" });
+  });
+});
+
+describe("fieldSummary", () => {
+  it("separates discovered, echoed and guessed fields", () => {
+    const profile = build({ query: { ...query, country: "CO", instagram: "casa_gaucho" }, google: google({ country: "" }) });
+    const summary = fieldSummary(profile);
+    expect(summary.discovered).toEqual(expect.arrayContaining(["name", "street"]));
+    expect(summary.echoed).toEqual(expect.arrayContaining(["country", "instagram"]));
+    expect(summary.guessed).toEqual(expect.arrayContaining(["menuLocale", "whatsapp"]));
+    expect(summary.discovered).not.toContain("menuLocale");
+  });
+
+  it("does not count a field with no source as echoed from your input", () => {
+    expect(fieldSummary({ fields: { weird: { value: "x", source: "", confidence: "medium" } } } as never).echoed).toEqual([]);
+  });
+
+  it("counts a value the user gave that a source confirmed as discovered, not echoed", () => {
+    const profile = build({ query: { ...query, country: "CO" }, google: google({ country: "CO" }) });
+    const summary = fieldSummary(profile);
+    expect(summary.discovered).toContain("country");
+    expect(summary.echoed).not.toContain("country");
+  });
+});
+
+describe("summaryLines", () => {
+  it("reports discovered, echoed and guessed fields in the CLI wording", () => {
+    const profile = build({ query: { ...query, country: "CO" }, google: google({ country: "MX", website: "https://gaucho.co" }) });
+    const lines = summaryLines(profile);
+    expect(lines[0]).toMatch(/^Found \d+ fact\(s\) from sources:/);
+    const text = lines.join("\n");
+    expect(text).toMatch(/Echoed \d+ from your input: country/);
+    expect(text).toMatch(/Not counted \(low-confidence guess\): .*menuLocale/);
+  });
+
+  it("says none instead of an empty list, and omits lines that do not apply", () => {
+    const lines = summaryLines(build({}));
+    expect(lines).toEqual(["Found 0 fact(s) from sources: none"]);
   });
 });
 
@@ -245,11 +326,47 @@ describe("renderReport", () => {
     expect(pdf).toContain("tablefacts menu raw");
   });
 
-  it("asks the client for what is missing", () => {
+  it("asks the client for what is missing, with the best next question first", () => {
     const empty = renderReport(build({}) as never, { notes: [], photos: [] });
     expect(empty).toContain("- Street address");
     expect(empty).toContain("- Instagram");
+    expect(empty).toContain("- **Best next question:**");
+    expect(empty).toContain("Google Maps link");
     expect(report).toContain("- Opening hours incl. holidays");
+  });
+
+  it("states a kept, blocked link at the top of the report", () => {
+    const withKept = renderReport(profile as never, { notes: [], photos: [], kept: [{ label: "TripAdvisor", url: "https://ta/x", reason: "bot protection" }] });
+    expect(withKept).toContain("Kept for a manual read");
+    expect(withKept.indexOf("Kept for a manual read")).toBeLessThan(withKept.indexOf("## Facts"));
+  });
+
+  it("marks a low-confidence guess as a guess, not a fact", () => {
+    const guessed = renderReport(build({ google: google() }) as never, { notes: [], photos: [] });
+    expect(guessed).toContain("| Menu language | es | country | low (guess) |");
+  });
+
+  it("says a snippet-sourced Instagram bio, separating counts and note with a space", () => {
+    const profile = build({ instagram: { handle: "makibar", followers: "1,200", posts: "789", partial: true, surface: "search snippet" } });
+    const r = renderReport(profile as never, { notes: [], photos: [] });
+    expect(r).toContain("Instagram @makibar: 1,200 followers, 789 posts. Bio from a search snippet");
+  });
+
+  it("flattens web text so it cannot forge report structure", () => {
+    const profile = build({ site: site({ meta: { siteName: "", description: "a\n\n## Injected\n`code`", themeColor: "" } }) });
+    const r = renderReport(profile as never, { notes: [], photos: [] });
+    expect(r).not.toContain("\n## Injected");
+    expect(r).not.toContain("`code`");
+  });
+
+  it("asks for a Google Maps link when the website is known but the map point is not", () => {
+    const r = renderReport(build({ google: google({ coords: null, website: "https://gaucho.co" }) }) as never, { notes: [], photos: [] });
+    expect(r).toContain("A Google Maps link would pin the exact location.");
+  });
+
+  it("asks for the WhatsApp number when the rest is known", () => {
+    const r = renderReport(build({ google: google({ phone: "", website: "https://gaucho.co" }) }) as never, { notes: [], photos: [] });
+    expect(r).toContain("Ask for the WhatsApp number");
   });
 
   it("warns that downloaded photos are reference, not assets", () => {
@@ -267,7 +384,7 @@ describe("setupAnswers", () => {
     const profile = build({
       query: { ...query, instagram: "casa_gaucho" },
       google: google({ phone: "+57 300 123 4567", website: "https://gaucho.co" }),
-      site: site({ links: links({ reserve: ["https://opentable.com/gaucho"] }) }),
+      site: site({ links: links({ reserve: ["https://opentable.com/gaucho"], whatsapp: ["573001234567"] }) }),
     });
     const lines = (setupAnswers(profile as never) as string).split("\n");
     expect(lines.slice(0, 12)).toEqual([
@@ -290,5 +407,13 @@ describe("setupAnswers", () => {
   it("leaves a blank line for what was not found, which keeps the template's value", () => {
     const lines = (setupAnswers(build({}) as never) as string).split("\n");
     expect(lines.slice(0, 12).every((line) => line === "")).toBe(true);
+  });
+
+  it("leaves a low-confidence guess out, so setup keeps the placeholder", () => {
+    // The phone number is only a guess at WhatsApp; it must not be written in as a fact.
+    const profile = build({ google: google({ phone: "+57 300 123 4567" }) });
+    expect(profile.fields.whatsapp).toMatchObject({ confidence: "low" });
+    const lines = (setupAnswers(profile as never) as string).split("\n");
+    expect(lines[3]).toBe("");
   });
 });

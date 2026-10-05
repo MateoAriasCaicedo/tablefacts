@@ -17,6 +17,8 @@ export async function fetchCluviMenu({ url, service, lang, config = defaultConfi
     menu,
     notes,
     title: `Cluvi: ${supplier.label} (id ${supplier.id}), ${fetched.service} menu in ${currency}`,
+    // The restaurant's own table set, so a shared database is never touched by accident.
+    tablePrefix: config.tablePrefix,
   };
 }
 
@@ -25,6 +27,8 @@ export async function fetchCluviMenu({ url, service, lang, config = defaultConfi
  * @param {import('../../lib/types.mjs').ImportCluviOptions} [options]
  * @returns {Promise<import('../../lib/types.mjs').ImportResult>}
  */
-export async function importCluvi({ url, service, lang, config, ...importOptions } = {}) {
-  return importMenu({ ...(await fetchCluviMenu({ url, service, lang, config })), ...importOptions });
+export async function importCluvi({ url, service, lang, config = defaultConfig, ...importOptions } = {}) {
+  const fetched = await fetchCluviMenu({ url, service, lang, config });
+  // An explicit `tablePrefix` (or the CLI's --table-prefix) wins over the config's.
+  return importMenu({ ...fetched, ...importOptions, tablePrefix: importOptions.tablePrefix ?? config.tablePrefix });
 }

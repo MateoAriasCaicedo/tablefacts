@@ -2,6 +2,7 @@
 // Usage: tablefacts research "Restaurant name" "City, Country" [options]
 import { parseArgs } from "node:util";
 import { research } from "./index.mjs";
+import { summaryLines } from "./lib/report.mjs";
 import { loadEnv } from "../lib/env.mjs";
 import { cliMessage, exitCodeFor } from "../lib/errors.mjs";
 import { consoleLog } from "../lib/log.mjs";
@@ -10,9 +11,11 @@ const HELP = `Research a restaurant from public sources and write a profile for 
 
   tablefacts research "<name>" "<city, country>" [options]
 
-Sources: Google Maps (Places API), OpenStreetMap, the restaurant's website,
-Instagram, TripAdvisor and link-in-bio pages (Linktree and similar). They find
-each other: the website or Google leads to Instagram, TripAdvisor and the hub.
+Sources: Google Maps (Places API), OpenStreetMap, a key-free web search, the
+restaurant's website, Instagram, TripAdvisor and link-in-bio pages (Linktree
+and similar). They find each other: the search, website or Google leads to
+Instagram, TripAdvisor and the hub. The web search runs when Google and
+OpenStreetMap find nothing.
 
 Options:
   --country <ISO>       country code, narrows the search (CO, MX, US...)
@@ -26,8 +29,9 @@ Options:
   --out <dir>           output folder (default .tablefacts/research/<slug>)
   -h, --help            this text
 
-Writes profile.json, report.md and setup-answers.txt. GOOGLE_PLACES_API_KEY goes
-in .env (see .env.example); without it OpenStreetMap and the web pages
+Writes profile.json, report.md and setup-answers.txt (and latest.json next to the
+folder, in the default location). GOOGLE_PLACES_API_KEY goes in .env (see
+.env.example); without it OpenStreetMap, the web search and the web pages
 still work, with fewer facts.`;
 
 const { values, positionals } = parseArgs({
@@ -52,9 +56,9 @@ try {
     tripadvisor: values.tripadvisor, linktree: values.linktree, render: values.render,
     google: !values["no-google"], photos: Number(values.photos ?? 0), out: values.out, log: consoleLog,
   });
-  const found = Object.keys(profile.fields).filter((k) => profile.fields[k]);
-  console.log(`
-Found ${found.length} fields: ${found.join(", ")}`);
+  // The lines are built in one place (summaryLines) so tests cover the exact wording the CLI prints.
+  console.log();
+  for (const line of summaryLines(profile)) console.log(line);
   for (const w of profile.warnings) console.log(`Warning: ${w}`);
   console.log(`
 Wrote ${outDir}

@@ -1,6 +1,12 @@
 // Everything restaurant-specific about the image-menu import. Edit this file,
 // not the other scripts, when the menu is organised differently.
 export default {
+  // This restaurant's tables in a shared Supabase database: the import writes
+  // public.mombasa_menu_categories / _menu_sections / _menu_products. Change
+  // it (or pass `--table-prefix`) when importing another restaurant; leave it
+  // empty only when this restaurant owns the unprefixed menu_* tables.
+  tablePrefix: "mombasa_",
+
   // The page that shows the menu pictures, or direct image URLs.
   // `tablefacts menu raw <url> [<url>...]` overrides it for one run.
   url: "https://www.mombasa.co/carta-restaurante-espanol/",
