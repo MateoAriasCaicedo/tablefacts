@@ -1,0 +1,32 @@
+{
+  "name": "extract",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Data extraction tools for restaurant sites: public-facts research, photos (Instagram, TripAdvisor) and menu import",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "extract": "bin/extract.mjs"
+  },
+  "exports": {
+    "./edge": "./src/lib/edge.mjs",
+    "./project": "./src/lib/project.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    ".env.example"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pg": "^8.23.1",
+    "playwright": "^1.63.0"
+  },
+  "devDependencies": {
+    "vitest": "^5.0.3"
+  }
+}

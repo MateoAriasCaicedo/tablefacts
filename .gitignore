@@ -1,0 +1,8 @@
+node_modules
+
+# env files: never commit one, but keep the example
+.env*
+!.env.example
+
+# output, caches and browser profiles of a run
+.extract
