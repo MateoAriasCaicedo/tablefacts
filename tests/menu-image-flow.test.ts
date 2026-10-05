@@ -93,7 +93,7 @@ describe("image menu pipeline", () => {
     expect(apiCalls).toBe(2);
     expect(first.menu[0].sections[0].products[0]).toMatchObject({ name: "Pan de Bono", price: 10000, currency: "COP" });
     expect(first.title).toMatch(/2 pages .*2 read with Anthropic/);
-    expect(first.notes[0]).toMatch(/Prices were read from pictures/);
+    expect(first.notes[0]).toMatch(/Prices were read from the menu pages/);
 
     const second = await fetchImageMenu({ urls: [`${base}/menu`], apiKey: "k", projectDir });
     expect(apiCalls).toBe(2); // served from the saved transcriptions

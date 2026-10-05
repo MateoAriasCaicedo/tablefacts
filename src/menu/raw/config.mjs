@@ -7,8 +7,8 @@ export default {
   // empty only when this restaurant owns the unprefixed menu_* tables.
   tablePrefix: "mombasa_",
 
-  // The page that shows the menu pictures, or direct image URLs.
-  // `tablefacts menu raw <url> [<url>...]` overrides it for one run.
+  // The page that shows the menu pictures, a direct image URL, or a PDF file
+  // path/URL. `tablefacts menu raw <url> [<url>...]` overrides it for one run.
   url: "https://www.mombasa.co/carta-restaurante-espanol/",
 
   // Currency of the prices, an ISO code. Colombian menus print pesos as
@@ -19,6 +19,10 @@ export default {
   // Multiply every price by this when the menu prints thousands short ("95"
   // for 95.000).
   scale: 1,
+
+  // Resolution a PDF page is rendered at before its printed product photos are
+  // screenshotted (2 means twice the page's size). Only used with `--images`.
+  imageScale: 2,
 
   // Each section the model reads is tagged food or drink (or other, which is
   // left out), and goes into the category that lists its group. The site's

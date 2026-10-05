@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Menu (`tablefacts menu raw`)
+
+- The source now reads **PDF menus** as well as pictures. An argument ending in `.pdf` is a local file
+  (resolved against the project) or an http(s) URL. A page that carries its own text is transcribed from that
+  text (a two-column layout is read column by column); a page with no text layer (a scan) is rendered and read
+  like a picture. `--list` shows which each page is. New optional dependencies: `pdfjs-dist` for reading,
+  `@napi-rs/canvas` for rendering (loaded lazily, with an `EDEPENDENCY` error naming the install command when
+  missing).
+- New options `--images <folder>` and `--image-base-url <url>` (`imageDir`, `imageBaseUrl` on
+  `importImageMenu`): the dish photos printed on a PDF page are screenshotted and saved. When the page places
+  each photo separately they are matched to the nearest printed dish name; when it does not (a flattened export,
+  vector art, a scan) the model is asked for each item's photo box instead, so photos can come from any page.
+  The new `--image-boxes auto|always` option controls this: `auto` (default) only reads a page as a picture when
+  it has no separately placed photo, while `always` reads every page as a picture so the model boxes each dish.
+  With a base URL each product's `image_url` is filled; without it the crops are saved and `image_url` stays
+  empty.
+- `findPages`, `listMenuImages` and `normalizePages` now also know about PDF pages: `listMenuImages` reports
+  `kind` and `chars`, and `normalizePages` returns `placements` (which products each item built) so photos can
+  be attached.
+
 ## 0.2.0
 
 - The menu importers no longer write hardcoded `public.menu_*` tables. A restaurant's config (or the

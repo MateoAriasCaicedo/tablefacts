@@ -2,7 +2,7 @@
 
 Data extraction tools for restaurant sites, shared by every Cannario template. Give it a restaurant's name and
 place and it gathers the public facts; point it at an Instagram or TripAdvisor page and it downloads the photos;
-point it at a Cluvi menu (or pictures of a paper menu) and it loads the menu into Supabase.
+point it at a Cluvi menu, a PDF menu, or pictures of a paper menu and it loads the menu into Supabase.
 
 Research needs no key: Google Places and OpenStreetMap run first, and a key-free web search (DuckDuckGo) fills in
 candidate links when they find no place or no website, so a bare name and place still produces a useful report.
@@ -16,7 +16,7 @@ Everything works two ways: as a **command line** (`tablefacts <tool>`) and as a 
 | Instagram photos | `tablefacts photos instagram` | `downloadInstagram()` | [src/instagram](src/instagram/README.md) |
 | TripAdvisor photos | `tablefacts photos tripadvisor` | `downloadTripadvisor()` | [src/tripadvisor](src/tripadvisor/README.md) |
 | Menu from Cluvi | `tablefacts menu cluvi` | `importCluvi()` | [src/menu](src/menu/README.md) |
-| Menu from pictures | `tablefacts menu raw` | `importImageMenu()` | [src/menu](src/menu/README.md) |
+| Menu from pictures or a PDF | `tablefacts menu raw` | `importImageMenu()` | [src/menu](src/menu/README.md) |
 
 Contents: [Requirements](#requirements) · [Install](#install) · [Quick start](#quick-start) ·
 [Command line](#command-line) · [Configuration](#configuration) · [Library](#use-it-as-a-library) ·
@@ -27,6 +27,9 @@ Contents: [Requirements](#requirements) · [Install](#install) · [Quick start](
 
 - **Node.js 24 or newer** (`engines` in `package.json`). The tools use the built-in `fetch` and `util.parseArgs`.
 - **Playwright** (optional) for the photo tools and `research --render`: `npm install --save-dev playwright`.
+- **pdfjs-dist** and **@napi-rs/canvas** (optional) for PDF menus with `tablefacts menu raw`:
+  `npm install pdfjs-dist @napi-rs/canvas`. Only reading a PDF page's text needs `pdfjs-dist`; rendering a scanned
+  page or a product photo also needs the canvas package (it comes with `@napi-rs/canvas` on Windows, macOS and Linux).
 - **Microsoft Edge on Windows** for the photo tools. They attach to a normal Edge window because the sites
   guard their pages with bot checks that automated browsers fail (see the photo tool READMEs). Starting Edge
   for you only works with Edge installed in its usual `Program Files` folder; elsewhere, start it yourself with
@@ -41,7 +44,8 @@ npx tablefacts --help
 ```
 
 Playwright is an **optional** peer dependency. Without it the photo tools and `research --render` stop with an
-`EDEPENDENCY` error that tells you to install it; everything else works.
+`EDEPENDENCY` error that tells you to install it; everything else works. `pdfjs-dist` (and `@napi-rs/canvas` for
+scans and product photos) is likewise optional and only `menu raw` with a PDF needs it.
 
 ## Quick start
 
@@ -124,10 +128,19 @@ Both share these options (and replace the menu in Supabase unless `--dry-run`):
 | `--replace-all` | Replace the whole menu, not only the categories in this import. Requires `--yes` (except with `--dry-run`) |
 | `--yes` | Confirm `--replace-all`, which empties the target tables (`<prefix>menu_categories`, `<prefix>menu_sections`, `<prefix>menu_products`) |
 | `--force` | Write even if the import has fewer than half the products it replaces |
+| `--images <folder>` | With a PDF, also save the dish photos printed on its pages |
+| `--image-base-url <url>` | https folder those photos will be published at; fills each product's `image_url` |
+| `--image-boxes <auto\|always>` | How photos are found. `auto` (default) reads the page as text and matches separately placed photos by position, using the model's boxes only when the page has none; `always` reads every page as a picture so the model boxes every dish's photo |
 
 `tablefacts menu cluvi [menu-url] [--service on_table|delivery|take_away] [--lang es]`
 
-`tablefacts menu raw [page-or-image-url...] [--list] [--only 1,3-5] [--provider anthropic|gemini|groq] [--model <id>] [--min-width 500] [--refresh]`
+`tablefacts menu raw [page-or-image-url...] [menu.pdf...] [--list] [--only 1,3-5] [--provider anthropic|gemini|groq] [--model <id>] [--min-width 500] [--refresh] [--images <folder>] [--image-base-url <url>] [--image-boxes auto|always]`
+
+For a PDF, an argument ending in `.pdf` is a local file (resolved against the project) or an http(s) URL. A page
+with text is transcribed from that text (a two-column layout is read column by column); a scanned page is rendered
+and read like a picture. `--images` also saves the printed product photos: a page that places each photo
+separately is matched by dish name, and a page that does not (a flattened export, vector art, a scan) is read as a
+picture so the model can box each dish — `--image-boxes always` does that on every page.
 
 Both read the restaurant-specific part (URL, category mapping, currency) from a `config.mjs` next to the tool.
 **The shipped configs hold another restaurant's values: edit them first.** See [src/menu/README.md](src/menu/README.md).
@@ -196,8 +209,8 @@ default output folder, browser profiles, the menu transcription cache, and where
 | `downloadTripadvisor({ links, out, cdp, edgeDir, max, dryRun, debug, projectDir, log })` | Downloads a restaurant page's photos. Same result | Playwright |
 | `importMenu({ menu, notes, title, dryRun, json, tablePrefix, allowUnprefixed, replaceAll, yes, force, databaseUrl, env, projectDir, log })` | Validates a menu and writes it to Supabase. Returns `{ totals, notes, written, dryRun, database }`, `database` being `{ label, tables, current: { categories, products, kept } }` or `null` when it was not reached | `SUPABASE_DB_URL` unless `dryRun` |
 | `importCluvi({ url, service, lang, config, ...importMenu options })` | Reads a Cluvi menu, then `importMenu` | `SUPABASE_DB_URL` unless `dryRun` |
-| `importImageMenu({ urls, only, provider, model, minWidth, refresh, apiKey, config, ...importMenu options })` | Transcribes menu pictures with a vision model, then `importMenu` | A vision key (see [Configuration](#configuration)) |
-| `listMenuImages({ urls, only, minWidth, config })` | Lists the menu pictures found on pages (numbered as `--list` shows) | none |
+| `importImageMenu({ urls, only, provider, model, minWidth, refresh, imageDir, imageBaseUrl, imageBoxes, apiKey, config, ...importMenu options })` | Transcribes menu pictures or a PDF with a model, then `importMenu`. A PDF page uses its text when it has one, a render when it is a scan. `imageDir` also saves the printed product photos (`imageBaseUrl` fills their links; `imageBoxes` is `'auto'` or `'always'`) | A vision key (see [Configuration](#configuration)); a PDF needs `pdfjs-dist` (`@napi-rs/canvas` too for scans or photos) |
+| `listMenuImages({ urls, only, minWidth, projectDir, config })` | Lists the pages found (pictures or PDF pages, numbered as `--list` shows) | none |
 | `loadEnv({ projectDir, files, env })` | Loads `.env` files into `env` (default `process.env`); returns the files it read | none |
 
 Also exported: `validateMenu`, `countMenu`, `parsePrice`, `normalizePages`, `providers`, `defaultProvider`,
@@ -233,7 +246,7 @@ Failures the library raises on purpose throw `TablefactsError`, which has a `cod
 | --- | --- |
 | `EUSAGE` | A missing or invalid argument (no `out`, no valid links, no `name`). CLIs exit with `2` |
 | `ECONFIG` | Missing configuration: database URL, API key, unknown provider, no menu URL |
-| `EDEPENDENCY` | An optional dependency is not installed (Playwright) |
+| `EDEPENDENCY` | An optional dependency is not installed (Playwright, or `pdfjs-dist`/`@napi-rs/canvas` for a PDF menu) |
 | `EFAILED` | A source failed or was blocked, data did not validate, or an import was refused (invalid menu, no products, far fewer products than it replaces) |
 
 When the error is about one option, `err.option` names it (`'out'`, `'links'`, `'force'`...) and the message writes
@@ -263,6 +276,7 @@ folder tablefacts is installed in, so one install serves every template.
 | `.env` | `<project>/.env`, then `<project>/data/.env` (older templates) |
 | Research output | `<project>/.tablefacts/research/<slug>/`, with `latest.json` next to the folders |
 | Menu transcription cache and downloaded page images | `<project>/.tablefacts/cache/<host>/` |
+| Product photos saved from a PDF | The `--images` folder, or `<project>/.tablefacts/menu-images` |
 | Fallback browser profile | `<project>/.tablefacts/instagram-profile` |
 | Photos | The `--out` folder you give |
 | Edge profile for the photo tools | `C:\ig-edge` (`--edge-dir` changes it) |
@@ -313,6 +327,12 @@ tables — is in [docs/MENU_TABLE_PREFIX.md](docs/MENU_TABLE_PREFIX.md).
   past bot protection: a blocked source is reported, not worked around.
 - Cluvi has no public API; the importer calls the two JSON endpoints its web app uses, which can change.
 - Prices read from pictures can be wrong. Read the dry run against the original before writing.
+- A PDF page with text is read as text; a scan is rendered and read as a picture, so small print can still be
+  misread. A two-column page is read column by column when the layout is clear, but an unusual layout is
+  flattened into single lines, so check the dry run. Product photos are screenshots cropped from the page: a
+  separately placed photo is matched to the nearest dish, and when the page has none (a flattened export, or
+  vector art) the model is asked for each dish's photo box instead — pass `--image-boxes always` to do that on
+  every page too. Boxes are approximate, so check the dry run.
 - Only download photos the restaurant owns or has allowed you to use. Guest photos on TripAdvisor and
   Instagram belong to their authors.
 

@@ -57,8 +57,9 @@ Every tool is a **library function** plus a thin **command**.
   blocked source. Photo tools wait for a person to pass a check in their own Edge window.
 - **Do not make tests depend on live sites** (Cluvi, TripAdvisor, toolzu, Google, OpenStreetMap).
 - Do not edit `types/`, `.tablefacts/`, `.extract/` or `node_modules/`; they are generated or git-ignored.
-- Do not add dependencies lightly: `pg` is the only runtime dependency and Playwright is an optional peer.
-  Load optional or heavy modules lazily, as `src/lib/playwright.mjs` and `src/menu/lib/db.mjs` do.
+- Do not add dependencies lightly: `pg` is the only runtime dependency, and Playwright (browser tools) and
+  `pdfjs-dist`/`@napi-rs/canvas` (PDF menus) are optional peer dependencies. Load optional or heavy modules
+  lazily, as `src/lib/playwright.mjs` and `src/menu/raw/pdfjs.mjs` do.
 
 ## Gotchas
 

@@ -30,10 +30,14 @@ const listNames = (names) => names.slice(0, 6).join(", ") + (names.length > 6 ? 
  * product per column, "Name (Botella)", because a product has one price.
  * @param {{ number?: number, notes?: string[], sections?: any[] }[]} pages transcriptions, one per page
  * @param {import('../../lib/types.mjs').RawConfig} config
- * @returns {{ menu: import('../../lib/types.mjs').Menu, notes: string[], currency: string }}
+ * @returns {{ menu: import('../../lib/types.mjs').Menu, notes: string[], currency: string, placements: { page: number, name: string, box: number[] | null, products: import('../../lib/types.mjs').MenuProduct[] }[] }}
  */
 export function normalizePages(pages, config) {
   const notes = [];
+  // What each item's products were built from, so a printed photo can be attached
+  // afterwards (raw/images.mjs). `box` is the model's rectangle on the page, when
+  // the page was read from a picture and product photos were requested.
+  const placements = [];
   const currency = String(config.currency ?? "").toUpperCase();
   if (!isCurrency(currency)) throw new TablefactsError(`config.currency "${config.currency}" is not a currency code (such as COP or USD).`, "ECONFIG");
 
@@ -90,15 +94,22 @@ export function normalizePages(pages, config) {
         }
         const variants = prices.length > 1 && prices.every((p) => p.label) ? prices : prices.slice(0, 1);
         if (prices.length > 1 && variants.length === 1) unlabeled.push(itemName);
+        const created = [];
         for (const { value, label: variant } of variants) {
-          products.push({
+          const product = {
             name: variants.length > 1 ? `${itemName} (${variant})` : itemName,
             description: cleanText(item.description) || null,
             price: value,
             currency,
             image_url: null,
             recommended: false,
-          });
+          };
+          products.push(product);
+          created.push(product);
+        }
+        if (created.length) {
+          const box = Array.isArray(item.box) && item.box.length === 4 && item.box.every((n) => Number.isFinite(n)) ? item.box.map(Number) : null;
+          placements.push({ page: page.number ?? index + 1, name: itemName, box, products: created });
         }
       }
       previous = target;
@@ -116,5 +127,5 @@ export function normalizePages(pages, config) {
       sections: [...c.sections].filter(([, list]) => list.length).map(([name, list]) => ({ name, products: list })),
     }))
     .filter((c) => c.sections.length);
-  return { menu, notes, currency };
+  return { menu, notes, currency, placements };
 }

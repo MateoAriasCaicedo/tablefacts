@@ -109,10 +109,13 @@ source (cluvi | raw)  ->  menu in the shared shape  ->  lib/import.mjs: importMe
   does the delete and bulk inserts in one transaction, scoped to the restaurant's prefixed tables.
 - **`lib/run.mjs`** (`runImport`) is the shared command wrapper: common flags, `--help`, `loadEnv`, exit code.
 - **`cluvi/`**: `source.mjs` calls Cluvi's two JSON endpoints, `import.mjs` maps them through `config.mjs`.
-- **`raw/`**: `source.mjs` finds and downloads page images, `vision.mjs` has a vision model transcribe each page
-  (providers differ only in how a request is built and read), `normalize.mjs` turns the transcription into the
-  shared shape (prices are parsed here from printed text, never by the model), `import.mjs` ties it together with
-  a per-page cache.
+- **`raw/`**: `source.mjs` finds and downloads page images; `pdf.mjs` reads a PDF (a page's text and text
+  positions, where each printed image sits, and a render) with the optional `pdfjs-dist` (`pdfjs.mjs` loads it on
+  use); `vision.mjs` has a model transcribe each page — a picture, a rendered scan, or a PDF page's text
+  (providers differ only in how a request is built and read); `images.mjs` matches a printed photo to a dish
+  (geometrically on a page that places it separately, or by the model's box when the page has none);
+  `normalize.mjs` turns the transcription into the shared shape (prices are parsed here from printed text, never
+  by the model); `import.mjs` ties it together with a per-page cache.
 
 ### Adding a menu source
 
@@ -124,9 +127,9 @@ Export the function from `src/menu/index.mjs` and `src/index.mjs`, document it w
 ### Adding a vision provider
 
 Add an entry to `providers` in `raw/vision.mjs` with `label`, `keyName`, `defaultModel`, a `request` that builds
-the call for one picture (`{ url, headers, body }`), and a `read` that extracts the transcription from the answer
-or throws why there is none. The schema, prompt, retries (HTTP 408/429/5xx, honouring the wait the service asks
-for up to a minute) and checks are shared.
+the call for one page (a picture file or a text page: `{ url, headers, body }`), and a `read` that extracts the
+transcription from the answer or throws why there is none. The schema, instructions, retries (HTTP 408/429/5xx,
+honouring the wait the service asks for up to a minute) and checks are shared.
 
 ## Tests
 

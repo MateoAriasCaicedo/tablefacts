@@ -179,6 +179,7 @@
  * @property {string} [thousands] Thousands separator the menu prints. Default ".".
  * @property {string} [decimal] Decimal separator the menu prints. Default ",".
  * @property {number} [scale] Multiplies every price. Default 1.
+ * @property {number} [imageScale] Resolution a PDF page is rendered at before its product photos are screenshot. Default 2.
  * @property {{ slug: string, name: string, groups?: ('food' | 'drink')[] }[]} [categories] Category that lists each group.
  * @property {Record<string, string>} [placeIn] Section title to category slug.
  * @property {Record<string, string>} [sections] Section title to the name stored.
@@ -199,13 +200,16 @@
 
 /**
  * @typedef {object} ImageMenuReadOptions
- * @property {string[]} [urls] Pages or image URLs. Default: the config's url.
+ * @property {string[]} [urls] Pages or image URLs, or PDF file paths/URLs. Default: the config's url.
  * @property {string | number[]} [only] Pages to read, e.g. '1,3-5' or [1, 3, 4, 5].
  * @property {string} [provider] Vision provider, see `providers`. Default MENU_VISION_PROVIDER or `defaultProvider`.
  * @property {string} [model]
  * @property {number} [minWidth] Ignore images declaring a smaller width. Default 500.
  * @property {string} [apiKey] Default: the provider's key in env.
  * @property {boolean} [refresh] Read the pages again instead of using the saved transcriptions.
+ * @property {string} [imageDir] Also save the dish photos printed on a PDF page here (resolved against projectDir). Enables photo extraction.
+ * @property {string} [imageBaseUrl] https folder the saved photos will be published at; fills each product's image_url with it plus the file name.
+ * @property {'auto' | 'always'} [imageBoxes] How photos are found: 'auto' (default) reads a PDF page from its text and matches placed photos by position, using the model's boxes only when the page has none; 'always' reads every PDF page as a picture so the model boxes every dish's photo. Default 'auto'.
  * @property {RawConfig} [config] Default: the raw config.mjs.
  */
 
@@ -216,14 +220,17 @@
  * @property {string[]} [urls]
  * @property {string | number[]} [only]
  * @property {number} [minWidth]
+ * @property {string} [projectDir] Project folder. Default: TABLEFACTS_PROJECT or the current folder.
  * @property {RawConfig} [config]
  */
 
 /**
  * @typedef {object} MenuImage
  * @property {number} number Position as the CLI's --list numbers it.
- * @property {string} url
+ * @property {string} url The image URL, or "<pdf path or URL>#<page number>" for a PDF page.
  * @property {string} alt
+ * @property {'image' | 'pdf'} [kind] Where the page came from. Default: 'image'.
+ * @property {number} [chars] Characters of text a PDF page has (0 means it is a scan).
  */
 
 /**

@@ -6,6 +6,7 @@ Scripts that read a restaurant's menu from the website that hosts it and write i
 | --- | --- | --- |
 | Cluvi (`<restaurant>.cluvi.co`) | `cluvi/` | working |
 | Menu that is only pictures (one image per page) | `raw/` | working, API calls untested |
+| Menu as a PDF (text layer or scan) | `raw/pdf.mjs` | working, optional `pdfjs-dist` |
 
 The same code is available as functions: `importCluvi`, `importImageMenu`, `listMenuImages` and `importMenu` (see the [main README](../../README.md#use-it-as-a-library)). Each source's `config.mjs` can be replaced with the `config` option, so a script can import a menu without editing the package:
 
@@ -23,10 +24,11 @@ const pictures = await listMenuImages({ urls: ['https://example.com/carta'], con
 ```
 
 - **Cluvi `config`**: `{ tablePrefix?, url?, categories: [{ slug, name, from[] }], sections: { 'Cluvi subcategory': 'SECTION NAME' } }`.
-- **Picture `config`**: `{ tablePrefix?, url?, currency, thousands, decimal, scale, categories: [{ slug, name, groups: ['food' | 'drink'] }], placeIn, sections, skipSections }`. `currency` is required.
+- **Picture `config`**: `{ tablePrefix?, url?, currency, thousands, decimal, scale, imageScale?, categories: [{ slug, name, groups: ['food' | 'drink'] }], placeIn, sections, skipSections }`. `currency` is required; `imageScale` is the PDF render resolution for product photos (default 2).
+- **Picture/PDF read options** (`importImageMenu`): `provider`, `model`, `minWidth`, `refresh`, `apiKey`, and the photo options `imageDir` (save the printed product photos), `imageBaseUrl` (fill their `image_url`) and `imageBoxes` (`'auto'` default, or `'always'`).
 - **Options every import takes**: `dryRun`, `json` (relative paths resolve against `projectDir`), `tablePrefix` (overrides the config's; the restaurant's table set on a shared database), `allowUnprefixed` (override the shared-database check and write the unprefixed `menu_*` tables, only when this restaurant owns them), `replaceAll`, `yes` (confirms a whole-menu `replaceAll`), `force`, `databaseUrl` (default `env.SUPABASE_DB_URL`), `env`, `projectDir` and `log(message, level)` (`'info'`, `'warn'` for notes, `'error'`).
 - **Result**: `{ totals, notes, written, dryRun, database }`; `database` is `{ label, tables, current: { categories, products, kept } }` once the database was inspected, and `null` when it was not reached (a dry run without a URL).
-- **Errors** are `TablefactsError`: `ECONFIG` (no URL, unknown provider, no key, bad currency, a bad `tablePrefix`, another restaurant's tables on an unprefixed import), `EFAILED` (invalid menu, no products, import refused without `force`), `EUSAGE` (bad `only`, `replaceAll` without `yes`). `err.option` names the option; the CLI shows the flag (`--force`, `--only`) and exits `2` for `EUSAGE`, `1` otherwise.
+- **Errors** are `TablefactsError`: `ECONFIG` (no URL, unknown provider, no key, bad currency, a bad `tablePrefix`, another restaurant's tables on an unprefixed import), `EDEPENDENCY` (`pdfjs-dist`/`@napi-rs/canvas` missing for a PDF), `EFAILED` (invalid menu, no products, import refused without `force`), `EUSAGE` (bad `only`, a bad `imageBoxes`, `replaceAll` without `yes`). `err.option` names the option; the CLI shows the flag (`--force`, `--only`) and exits `2` for `EUSAGE`, `1` otherwise.
 
 ## Setup
 
@@ -71,9 +73,9 @@ tablefacts menu cluvi --help
 
 Edit `cluvi/config.mjs` first: the menu URL, how Cluvi's main categories fold into the site's categories, and section renames. The run prints what the site still needs (dictionary keys, `content/qr.ts`).
 
-## Run (menu that is only pictures)
+## Run (menu that is only pictures or a PDF)
 
-For a restaurant whose site shows the menu as a gallery of page images, such as <https://www.mombasa.co/carta-restaurante-espanol/>. Each page is transcribed by a vision model from one of three providers, so it needs that provider's key in `.env`:
+For a restaurant whose site shows the menu as a gallery of page images, such as <https://www.mombasa.co/carta-restaurante-espanol/>, or that offers it as a PDF. Each page is transcribed by a model from one of three providers, so it needs that provider's key in `.env`:
 
 | `--provider` | Key in `.env` | Default `--model` |
 | --- | --- | --- |
@@ -92,12 +94,32 @@ tablefacts menu raw                           # replace this restaurant's menu i
 tablefacts menu raw <page-or-image-url>... # another restaurant
 tablefacts menu raw --table-prefix makibar_ # override the config's table prefix for one run
 tablefacts menu raw --replace-all --yes     # empty this restaurant's tables first, then write
+tablefacts menu raw carta.pdf --list        # pages of a PDF file (a .pdf URL works too)
+tablefacts menu raw carta.pdf --dry-run     # text pages from their text, scans from a render
+tablefacts menu raw carta.pdf --images ./carta-fotos --image-base-url https://cdn.example.com/carta/ --dry-run
+tablefacts menu raw carta.pdf --images ./carta-fotos --image-boxes always --dry-run
 ```
 
-Edit `raw/config.mjs` first: the URL, the currency, how the menu prints prices (`$95.000` is `thousands: "."`, `decimal: ","`) and which category each section goes to.
+A PDF argument ends in `.pdf` and is a local file or an http(s) URL. A page that carries its own text is
+transcribed from that text (cheaper and exact); a page with no text layer is rendered and read like a picture
+(`chars` in `--list` tells them apart). Rendering needs `@napi-rs/canvas`; text-only PDFs need only `pdfjs-dist`.
+
+`--images <folder>` also saves the dish photos printed on a PDF page, as PNG crops of the page render. Two ways
+the crop finds its dish: when the page places each photo separately, each is matched to the product whose printed
+name is nearest it; when it does not (a flattened export, vector art, a scan), the model is asked for each dish's
+photo box instead. That fallback reads the page as a picture, so asking for photos adds a vision call to pages
+with no separately placed photo. `--image-boxes always` reads **every** PDF page as a picture so the model boxes
+each dish even when the page also places some photos separately (one vision call per page); `auto` (the default)
+only does that when the page has no separately placed photo. `--image-base-url https://host/path/` then fills
+each product's `image_url` with that URL plus the file name, so the import can use it. Without it the photos are
+saved but `image_url` stays empty until you host them and re-run with the base URL.
+
+Edit `raw/config.mjs` first: the URL (a PDF path/URL works there too), the currency, how the menu prints prices (`$95.000` is `thousands: "."`, `decimal: ","`) and which category each section goes to.
 
 - `raw/source.mjs` takes the large JPG/PNG/WebP images of the page in document order (full size, not the thumbnails; logos and icons are skipped by width) and downloads them. A site that builds its gallery with JavaScript shows up as "no images": pass the image URLs instead.
-- `raw/vision.mjs` has the model transcribe each page into sections and dishes with one request: a forced tool call for Anthropic, JSON held to the same schema for Gemini (`generateContent`) and Groq (strict structured output), so every provider hands back the same shape. Prices come back as printed text and `raw/normalize.mjs` parses them, so a thousands separator is never guessed by the model. Adding a provider is one more entry in `providers` there.
+- `raw/pdf.mjs` reads a PDF (a local file or URL) with the optional `pdfjs-dist`: a page's text and text positions, where each printed image sits on the page, and a render of the page. A page with enough text is sent to the model as text (a two-column layout is read column by column); a scan is rendered and sent as a picture. `raw/pdfjs.mjs` loads the dependency on use and turns a missing one into an `EDEPENDENCY` error with the install command.
+- `raw/vision.mjs` has the model transcribe each page into sections and dishes with one request: a forced tool call for Anthropic, JSON held to the same schema for Gemini (`generateContent`) and Groq (strict structured output), so every provider hands back the same shape. The same providers read a PDF page's text (no picture) and can return each item's photo box. Prices come back as printed text and `raw/normalize.mjs` parses them, so a thousands separator is never guessed by the model. Adding a provider is one more entry in `providers` there.
+- `raw/images.mjs` ties a product photo to a dish: by the model's box (a scan, or a page with no separately placed photo), or by matching the dish name to the page's text and taking the nearest placed image. `raw/import.mjs` saves the crops and fills `image_url` when a base URL is given.
 - Groq serves a single vision model, `qwen/qwen3.8-27b`, and it is a preview one: if Groq retires it, pass its successor with `--model`.
 - Rate limits (HTTP 429) are retried after the wait the service asks for, up to a minute; for a longer wait the run stops with the service's message. Pages already read are saved (below), so run it again later.
 - The model tags each section food, drink or other; `config.categories` maps those to the site's categories. A section with no heading continues the one before it, even across pages. A dish with several price columns (bottle and glass) becomes one product per column, "Name (Botella)".

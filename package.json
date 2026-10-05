@@ -1,10 +1,11 @@
 {
   "name": "tablefacts",
   "version": "0.2.0",
-  "description": "Data extraction tools for restaurant sites: public-facts research, photos (Instagram, TripAdvisor) and menu import",
+  "description": "Data extraction tools for restaurant sites: public-facts research, photos (Instagram, TripAdvisor) and menu import from Cluvi, pictures or PDFs",
   "keywords": [
     "restaurant",
     "menu",
+    "pdf",
     "scraper",
     "tripadvisor",
     "instagram",
@@ -61,15 +62,25 @@
     "pg": "^8.23.1"
   },
   "devDependencies": {
+    "@napi-rs/canvas": "^1.0.10",
     "@types/node": "^26.6.4",
+    "pdfjs-dist": "~6.2.108",
     "playwright": "^1.63.0",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"
   },
   "peerDependencies": {
+    "@napi-rs/canvas": "^1.0.10",
+    "pdfjs-dist": "~6.2.108",
     "playwright": "^1.63.0"
   },
   "peerDependenciesMeta": {
+    "@napi-rs/canvas": {
+      "optional": true
+    },
+    "pdfjs-dist": {
+      "optional": true
+    },
     "playwright": {
       "optional": true
     }

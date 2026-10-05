@@ -13,7 +13,8 @@ const headers = { "user-agent": "cannario-menu-sync/1.0 (restaurant menu importe
 const IMAGE = /\.(jpe?g|png|webp)(\?|$)/i;
 const MAX_BYTES = 5 * 1024 * 1024; // the Claude API refuses larger images; Gemini and Groq take 20 MB, so this is the tightest limit
 
-async function get(url, what) {
+/** A fetch with retries on server errors; shared with the PDF reader. */
+export async function get(url, what) {
   let failure;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
@@ -71,7 +72,13 @@ export async function discoverPages(inputs, options) {
   const found = await Promise.allSettled(
     inputs.map(async (input) => {
       if (IMAGE.test(new URL(input).pathname)) return [{ url: input, alt: "" }];
-      const html = await (await get(input, "page")).text();
+      const res = await get(input, "page");
+      // The argument was not seen as a PDF (its address does not end in .pdf):
+      // say so instead of reporting "no images".
+      if ((res.headers.get("content-type") ?? "").toLowerCase().includes("pdf")) {
+        throw new TablefactsError(`${input} serves a PDF whose address does not end in .pdf. Download it and pass the file instead.`, "EFAILED");
+      }
+      const html = await res.text();
       const images = findImages(html, input, options);
       if (!images.length) {
         throw new TablefactsError(
