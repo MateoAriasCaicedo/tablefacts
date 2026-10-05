@@ -1,7 +1,7 @@
 // Google Places API (New): the best single source for address, map point,
 // phone, hours and photos. Needs GOOGLE_PLACES_API_KEY in .env.
 import { fromGoogle } from "./hours.mjs";
-import { sameText } from "./util.mjs";
+import { mapPool, sameText } from "./util.mjs";
 
 const FIELDS = [
   "id", "displayName", "formattedAddress", "addressComponents", "location", "nationalPhoneNumber",
@@ -82,13 +82,12 @@ export async function searchGoogle({ name, location, country, key }) {
 
 /** Downloads up to `count` photos into `dir`, returns what was saved. The key stays out of the result. */
 export async function downloadPhotos(place, key, count, save) {
-  const saved = [];
-  for (const [i, ph] of place.photos.slice(0, count).entries()) {
+  const saved = await mapPool(place.photos.slice(0, count), 4, async (ph, i) => {
     const res = await fetch(`https://places.googleapis.com/v1/${ph.name}/media?maxWidthPx=2400&key=${key}`, { signal: AbortSignal.timeout(30000) });
-    if (!res.ok) continue;
+    if (!res.ok) return null;
     const file = `google-${String(i + 1).padStart(2, "0")}.jpg`;
     await save(file, Buffer.from(await res.arrayBuffer()));
-    saved.push({ file, width: ph.width, height: ph.height, authors: ph.authors });
-  }
-  return saved;
+    return { file, width: ph.width, height: ph.height, authors: ph.authors };
+  });
+  return saved.filter(Boolean);
 }

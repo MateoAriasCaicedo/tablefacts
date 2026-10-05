@@ -1,6 +1,8 @@
 // The pure parts of download.mjs: reading the command line and the links it is given.
 // Split out so they can be tested without starting a browser.
 
+import { usageError } from '../lib/errors.mjs'
+
 export function parseArgs(argv) {
   const opts = { links: [], headed: false, dryRun: false, debug: false }
   for (let i = 0; i < argv.length; i++) {
@@ -8,7 +10,7 @@ export function parseArgs(argv) {
     if (a === '--out') opts.out = argv[++i]
     else if (a === '--cdp') opts.cdp = argv[++i]
     else if (a === '--edge-dir') opts.edgeDir = argv[++i]
-    else if (a === '--google') opts.google = true
+    else if (a === '--google') opts.viaGoogle = true
     else if (a === '--file') opts.file = argv[++i]
     else if (a === '--browser') opts.browser = argv[++i]
     else if (a === '--profile') opts.profile = argv[++i]
@@ -18,7 +20,7 @@ export function parseArgs(argv) {
     else if (a === '--dry-run') opts.dryRun = true
     else if (a === '--debug') opts.debug = true
     else if (a === '--help' || a === '-h') opts.help = true
-    else if (a.startsWith('--')) throw new Error(`Unknown option ${a}`)
+    else if (a.startsWith('--')) throw usageError(`Unknown option ${a}`)
     else opts.links.push(a)
   }
   return opts

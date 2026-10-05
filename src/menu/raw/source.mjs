@@ -4,11 +4,10 @@
 // page's HTML in document order. Sites that load their pictures from
 // JavaScript show up as "no images": pass the image URLs directly instead.
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { workDir } from "../../lib/project.mjs";
-
-export const cacheRoot = workDir("cache");
+import { TablefactsError } from "../../lib/errors.mjs";
+import { workDirIn } from "../../lib/project.mjs";
 
 const headers = { "user-agent": "cannario-menu-sync/1.0 (restaurant menu importer)" };
 const IMAGE = /\.(jpe?g|png|webp)(\?|$)/i;
@@ -20,7 +19,7 @@ async function get(url, what) {
     try {
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
       if (res.ok) return res;
-      failure = Object.assign(new Error(`HTTP ${res.status} fetching ${what} ${url}`), { status: res.status });
+      failure = Object.assign(new TablefactsError(`HTTP ${res.status} fetching ${what} ${url}`, "EFAILED"), { status: res.status });
       if (res.status < 500) break;
     } catch (error) {
       failure = error;
@@ -62,49 +61,56 @@ export function findImages(html, pageUrl, { minWidth = 500 } = {}) {
 
 /** Each argument is a page to scan or a direct image URL. */
 export async function discoverPages(inputs, options) {
-  const pages = [];
   for (const input of inputs) {
     try {
       new URL(input);
     } catch {
-      throw new Error(`"${input}" is not a URL.`);
+      throw new TablefactsError(`"${input}" is not a URL.`, "EUSAGE");
     }
-    if (IMAGE.test(new URL(input).pathname)) {
-      pages.push({ url: input, alt: "" });
-      continue;
-    }
-    const html = await (await get(input, "page")).text();
-    const images = findImages(html, input, options);
-    if (!images.length) {
-      throw new Error(
-        `No menu images found in ${input} (looked for JPG, PNG or WebP at least ${options?.minWidth ?? 500}px wide).\n` +
-          "If the page loads its pictures with JavaScript, open it, copy the image addresses and pass them instead; use --min-width to lower the size filter.",
-      );
-    }
-    pages.push(...images);
   }
-  return pages;
+  const found = await Promise.allSettled(
+    inputs.map(async (input) => {
+      if (IMAGE.test(new URL(input).pathname)) return [{ url: input, alt: "" }];
+      const html = await (await get(input, "page")).text();
+      const images = findImages(html, input, options);
+      if (!images.length) {
+        throw new TablefactsError(
+          `No menu images found in ${input} (looked for JPG, PNG or WebP at least ${options?.minWidth ?? 500}px wide).\n` +
+            "If the page loads its pictures with JavaScript, open it, copy the image addresses and pass them instead; use `minWidth` to lower the size filter.",
+          "EFAILED",
+        );
+      }
+      return images;
+    }),
+  );
+  const failed = found.find((r) => r.status === "rejected");
+  if (failed) throw failed.reason; // the first input's failure, whichever finished first
+  return found.flatMap((r) => r.value);
 }
 
 export const pageId = (url) => createHash("sha1").update(url).digest("hex").slice(0, 10);
 
 /** Downloads one page image into the cache (once) and returns where it is and what it is. */
-export async function downloadPage(page, host) {
-  const dir = join(cacheRoot, host);
-  mkdirSync(dir, { recursive: true });
+export async function downloadPage(page, host, { projectDir } = {}) {
+  const dir = join(workDirIn(projectDir, "cache"), host);
+  await mkdir(dir, { recursive: true });
   const id = pageId(page.url);
   const meta = join(dir, `${id}.type`);
   const types = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp" };
-  const known = ["jpg", "png", "webp"].map((ext) => join(dir, `${id}.${ext}`)).find(existsSync);
-  if (known && existsSync(meta)) return { id, dir, file: known, mediaType: readFileSync(meta, "utf8") };
+  // The saved media type names the extension, so a cache hit is one read and one access check.
+  const saved = await readFile(meta, "utf8").catch(() => null);
+  if (saved && types[saved]) {
+    const known = join(dir, `${id}.${types[saved]}`);
+    if (await access(known).then(() => true, () => false)) return { id, dir, file: known, mediaType: saved };
+  }
 
   const res = await get(page.url, "image");
   const mediaType = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-  if (!types[mediaType]) throw new Error(`${page.url} is ${mediaType || "of unknown type"}, not a JPG, PNG or WebP image.`);
+  if (!types[mediaType]) throw new TablefactsError(`${page.url} is ${mediaType || "of unknown type"}, not a JPG, PNG or WebP image.`, "EFAILED");
   const bytes = Buffer.from(await res.arrayBuffer());
-  if (bytes.length > MAX_BYTES) throw new Error(`${page.url} is ${(bytes.length / 1048576).toFixed(1)} MB; menu pages are limited to 5 MB so that every provider can read them. Save a smaller copy.`);
+  if (bytes.length > MAX_BYTES) throw new TablefactsError(`${page.url} is ${(bytes.length / 1048576).toFixed(1)} MB; menu pages are limited to 5 MB so that every provider can read them. Save a smaller copy.`, "EFAILED");
   const file = join(dir, `${id}.${types[mediaType]}`);
-  writeFileSync(file, bytes);
-  writeFileSync(meta, mediaType);
+  await writeFile(file, bytes);
+  await writeFile(meta, mediaType);
   return { id, dir, file, mediaType };
 }

@@ -2,7 +2,7 @@
 // not the other scripts, when the menu is organised differently.
 export default {
   // The page that shows the menu pictures, or direct image URLs.
-  // `extract menu raw <url> [<url>...]` overrides it for one run.
+  // `tablefacts menu raw <url> [<url>...]` overrides it for one run.
   url: "https://www.mombasa.co/carta-restaurante-espanol/",
 
   // Currency of the prices, an ISO code. Colombian menus print pesos as

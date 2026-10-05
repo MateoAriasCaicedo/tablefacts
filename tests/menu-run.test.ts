@@ -15,7 +15,6 @@ const db = vi.hoisted(() => ({
   replaceMenu: vi.fn(),
 }));
 vi.mock("../src/menu/lib/db.mjs", () => ({
-  loadEnv: () => {},
   connect: db.connect,
   inspect: db.inspect,
   replaceMenu: db.replaceMenu,
@@ -35,7 +34,7 @@ const scratch: string[] = [];
 
 /** Runs an import with the given flags and returns what it printed. */
 async function run(args: string[], fetchMenu: Anything = async () => ({ menu, notes: ["a source note"], title: "Test source" }), options: Anything = {}) {
-  process.argv = ["node", "extract.mjs", ...args];
+  process.argv = ["node", "tablefacts.mjs", ...args];
   await runImport({ usage: "Usage: test", fetchMenu, options });
   return { out: out.join("\n"), errors: errors.join("\n"), exitCode: process.exitCode };
 }

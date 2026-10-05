@@ -14,7 +14,7 @@ describe("parseArgs", () => {
   });
 
   it("reads switches", () => {
-    expect(parseArgs(["--headed", "--dry-run", "--debug", "--google"])).toMatchObject({ headed: true, dryRun: true, debug: true, google: true });
+    expect(parseArgs(["--headed", "--dry-run", "--debug", "--google"])).toMatchObject({ headed: true, dryRun: true, debug: true, viaGoogle: true });
   });
 
   it("reads help in both spellings", () => {

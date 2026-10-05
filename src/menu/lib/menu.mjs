@@ -1,4 +1,4 @@
-// What every menu source (data/menu/<source>/) produces, and the helpers they
+// What every menu source (src/menu/<source>/) produces, and the helpers they
 // share. A source turns a restaurant's menu on some website into this shape;
 // lib/run.mjs then checks it and writes it to Supabase.
 //
@@ -9,6 +9,8 @@
 // the ones in frontend/src/content/menu.ts: a category's `slug` is the key the
 // dictionaries use, and section names are UPPERCASE strings that
 // `menu.sections` in dictionary.ts maps to display names.
+import { TablefactsError } from "../../lib/errors.mjs";
+import { fold, slugify as slug } from "../../lib/text.mjs";
 
 const squash = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
 
@@ -16,10 +18,9 @@ const squash = (text) => String(text ?? "").replace(/\s+/g, " ").trim();
 export const cleanText = squash;
 
 /** Lowercase, accent-free key, to compare labels typed by different people. */
-export const matchKey = (text) =>
-  squash(text).normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+export const matchKey = (text) => fold(squash(text));
 
-export const slugify = (text) => matchKey(text).replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+export const slugify = (text) => slug(squash(text));
 
 export const sectionName = (text) => squash(text).toLocaleUpperCase("es");
 
@@ -51,6 +52,11 @@ const currencies = new Set(Intl.supportedValuesOf("currency"));
 /** An invalid code would make Intl.NumberFormat throw in the site's formatPrice. */
 export const isCurrency = (code) => currencies.has(String(code ?? "").toUpperCase());
 
+/**
+ * Totals of a menu.
+ * @param {import('../../lib/types.mjs').Menu} menu
+ * @returns {import('../../lib/types.mjs').MenuTotals}
+ */
 export function countMenu(menu) {
   const sections = menu.flatMap((c) => c.sections);
   const products = sections.flatMap((s) => s.products);
@@ -62,7 +68,11 @@ export function countMenu(menu) {
   };
 }
 
-/** Throws on anything the database or the site could not take, naming the culprit. */
+/**
+ * Throws a TablefactsError (EFAILED) on anything the database or the site could not take, naming the culprit.
+ * @param {import('../../lib/types.mjs').Menu} menu
+ * @returns {void}
+ */
 export function validateMenu(menu) {
   const problems = [];
   const slugs = new Set();
@@ -81,5 +91,5 @@ export function validateMenu(menu) {
       }
     }
   }
-  if (problems.length) throw new Error(`The extracted menu is not valid:\n  - ${problems.slice(0, 10).join("\n  - ")}`);
+  if (problems.length) throw new TablefactsError(`The extracted menu is not valid:\n  - ${problems.slice(0, 10).join("\n  - ")}`, "EFAILED");
 }

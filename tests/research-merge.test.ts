@@ -240,9 +240,9 @@ describe("renderReport", () => {
 
   it("points at the Cluvi importer for a Cluvi menu and at the PDF reader for a PDF", () => {
     const cluvi = renderReport(build({ site: site({ links: links({ menu: ["https://x.cluvi.co/menu"] }) }) }) as never, { notes: [], photos: [] });
-    expect(cluvi).toContain("extract menu cluvi");
+    expect(cluvi).toContain("tablefacts menu cluvi");
     const pdf = renderReport(build({ site: site({ links: links({ menu: ["https://x.co/carta.pdf"] }) }) }) as never, { notes: [], photos: [] });
-    expect(pdf).toContain("extract menu raw");
+    expect(pdf).toContain("tablefacts menu raw");
   });
 
   it("asks the client for what is missing", () => {
@@ -258,7 +258,7 @@ describe("renderReport", () => {
   });
 
   it("ends with the command that applies the answers", () => {
-    expect(report).toContain("npm run setup < .extract/research/gaucho/setup-answers.txt");
+    expect(report).toContain("npm run setup < .tablefacts/research/gaucho/setup-answers.txt");
   });
 });
 

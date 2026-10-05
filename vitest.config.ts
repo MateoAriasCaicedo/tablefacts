@@ -7,6 +7,6 @@ export default defineConfig({
     environment: "node",
     // The tools work on "the project in the current folder"; tests use a fixture project so they
     // never read or write the repo they run in.
-    env: { EXTRACT_PROJECT: fileURLToPath(new URL("./tests/fixtures/project", import.meta.url)) },
+    env: { TABLEFACTS_PROJECT: fileURLToPath(new URL("./tests/fixtures/project", import.meta.url)) },
   },
 });

@@ -1,6 +1,7 @@
 // Reads a restaurant's own web pages (and link-in-bio hubs like Linktree, and a
 // TripAdvisor page when it lets us in) with plain fetch and regexes: no HTML
 // parser dependency. Falls back to Playwright when a page renders client-side.
+import { loadPlaywright } from "../../lib/playwright.mjs";
 import { fetchText, sleep, BROWSER_UA } from "./util.mjs";
 import { fromOsm, fromSpec } from "./hours.mjs";
 
@@ -68,7 +69,7 @@ function jsonLd(html) {
 }
 
 /** Pulls every fact a page holds. `base` resolves relative links. */
-export function analyzeHtml(html, base) {
+export function analyzeHtml(html, base, lines = visibleLines(html)) {
   const meta = {};
   for (const m of html.matchAll(/<meta\b([^>]*)>/gi)) {
     const a = attrs(m[1]);
@@ -79,9 +80,13 @@ export function analyzeHtml(html, base) {
     .map((m) => ({ href: abs(attrs(m[1]).href ?? "", base), text: strip(m[2]) }))
     .filter((a) => a.href);
   // Hubs and single-page apps keep their links in JSON blobs, not in <a> tags.
+  const hrefs = new Set(anchors.map((a) => a.href));
   for (const m of html.matchAll(/"(?:url|href|link)"\s*:\s*"(https?:[^"]+)"/g)) {
     const u = m[1].replace(/\\u0026/g, "&").replace(/\\\//g, "/");
-    if (!anchors.some((a) => a.href === u)) anchors.push({ href: u, text: "" });
+    if (!hrefs.has(u)) {
+      hrefs.add(u);
+      anchors.push({ href: u, text: "" });
+    }
   }
 
   const links = { tel: [], mail: [], whatsapp: [], reserve: [], menu: [], delivery: [], maps: [], waze: [], facebook: [], tiktok: [], tripadvisor: [], hubs: [], instagram: [] };
@@ -112,10 +117,14 @@ export function analyzeHtml(html, base) {
   links.instagram = [...ig].sort((a, b) => b[1] - a[1]).map(([h]) => h);
 
   const images = [];
+  const imageKeys = new Set();
   const addImage = (url, alt = "", extra = {}) => {
     if (!url || /^data:/.test(url) || /(icon|sprite|favicon|pixel|spacer|avatar|badge|payment|flag|tripadvisor|facebook|instagram|whatsapp)\b/i.test(url)) return;
     const key = url.split("?")[0];
-    if (!images.some((i) => i.url.split("?")[0] === key)) images.push({ url, alt, ...extra });
+    if (!imageKeys.has(key)) {
+      imageKeys.add(key);
+      images.push({ url, alt, ...extra });
+    }
   };
   addImage(abs(meta["og:image"], base), "og:image");
   const logos = [];
@@ -134,7 +143,6 @@ export function analyzeHtml(html, base) {
     if (/apple-touch-icon|icon/.test(a.rel ?? "") && a.href) logos.push({ url: abs(a.href, base), kind: a.rel });
   }
 
-  const lines = visibleLines(html);
   const ld = jsonLd(html);
   if (ld?.logo) logos.unshift({ url: abs(ld.logo, base), kind: "json-ld" });
   return {
@@ -151,43 +159,79 @@ export function analyzeHtml(html, base) {
   };
 }
 
-async function render(url) {
-  let browser;
+/**
+ * One lazily launched Chromium shared by every render of a run. `get()` launches on first use;
+ * `close()` is safe to call when nothing was launched.
+ */
+export function createBrowser() {
+  let launching = null;
+  return {
+    get() {
+      launching ??= loadPlaywright().then(({ chromium }) => chromium.launch());
+      return launching;
+    },
+    async close() {
+      if (!launching) return;
+      const pending = launching;
+      launching = null;
+      try { await (await pending).close(); } catch { /* it never launched */ }
+    },
+  };
+}
+
+// `strict` (the caller asked for rendering) reports a missing Playwright; the automatic fallbacks stay silent.
+async function render(url, strict, browser) {
+  let page;
   try {
-    const { chromium } = await import("playwright");
-    browser = await chromium.launch();
-    const page = await browser.newPage({ userAgent: BROWSER_UA });
+    page = await (await browser.get()).newPage({ userAgent: BROWSER_UA });
     await page.goto(url, { waitUntil: "networkidle", timeout: 25000 });
     return await page.content();
-  } catch {
+  } catch (e) {
+    if (strict && e.code === "EDEPENDENCY") throw e;
     return null;
   } finally {
-    await browser?.close();
+    await page?.close().catch(() => {});
   }
 }
 
-/** One page, analysed. Returns { page, blocked } and never throws on HTTP errors. */
-export async function readPage(url, { renderJs = false } = {}) {
-  let r;
-  try { r = await fetchText(url); } catch (e) { return { page: null, blocked: `${e.message}` }; }
-  if (!r.ok) {
-    // Bot walls answer 403/429/503 to a plain fetch; a real browser often gets through.
-    const html = [403, 429, 503].includes(r.status) ? await render(url) : null;
-    return html ? { page: { ...analyzeHtml(html, url), rendered: true } } : { page: null, blocked: `HTTP ${r.status}` };
+/** One page, analysed. Returns { page, blocked } and never throws on HTTP errors. `browser` is a shared createBrowser(); without one a private browser is used and closed. */
+export async function readPage(url, { renderJs = false, browser } = {}) {
+  const own = browser ? null : createBrowser();
+  const shared = browser ?? own;
+  try {
+    let r;
+    try { r = await fetchText(url); } catch (e) { return { page: null, blocked: `${e.message}` }; }
+    if (!r.ok) {
+      // Bot walls answer 403/429/503 to a plain fetch; a real browser often gets through.
+      const html = [403, 429, 503].includes(r.status) ? await render(url, false, shared) : null;
+      return html ? { page: { ...analyzeHtml(html, url), rendered: true } } : { page: null, blocked: `HTTP ${r.status}` };
+    }
+    // Decide "thin" from the visible text first, so a thin page is parsed only once (rendered) and a full one once (as fetched).
+    const lines = visibleLines(r.text);
+    if (renderJs || lines.join(" ").length < 300) {
+      const html = await render(r.url, renderJs, shared);
+      if (html) return { page: { ...analyzeHtml(html, r.url), rendered: true } };
+    }
+    return { page: analyzeHtml(r.text, r.url, lines) };
+  } finally {
+    await own?.close();
   }
-  let page = analyzeHtml(r.text, r.url);
-  if (renderJs || page.textLength < 300) {
-    const html = await render(r.url);
-    if (html) page = { ...analyzeHtml(html, r.url), rendered: true };
-  }
-  return { page };
 }
 
 const PAGE_HINT = /contact|ubica|visit|about|nosotros|historia|story|nuestra|menu|carta|reserv|evento|event|horario|hours|donde|find/i;
 
 /** The restaurant's own site: the home page plus a few contact/about/menu pages, merged. */
-export async function scrapeSite(startUrl, { renderJs = false, maxPages = 6 } = {}) {
-  const first = await readPage(startUrl, { renderJs });
+export async function scrapeSite(startUrl, { renderJs = false, maxPages = 6, browser } = {}) {
+  const own = browser ? null : createBrowser();
+  try {
+    return await scrape(startUrl, { renderJs, maxPages, browser: browser ?? own });
+  } finally {
+    await own?.close();
+  }
+}
+
+async function scrape(startUrl, { renderJs, maxPages, browser }) {
+  const first = await readPage(startUrl, { renderJs, browser });
   if (!first.page) throw new Error(`could not read ${startUrl} (${first.blocked})`);
   const pages = [first.page];
   const seen = new Set([first.page.url.split("#")[0]]);
@@ -195,16 +239,34 @@ export async function scrapeSite(startUrl, { renderJs = false, maxPages = 6 } = 
   const next = first.page.anchors
     .filter((a) => host(a.href) === same && !/\.(pdf|jpe?g|png|webp|svg|zip)($|\?)/i.test(a.href) && PAGE_HINT.test(`${a.text} ${new URL(a.href).pathname}`))
     .map((a) => a.href.split("#")[0]);
+  const queue = [];
   for (const url of next) {
-    if (pages.length >= maxPages) break;
     if (seen.has(url)) continue;
     seen.add(url);
-    await sleep(500);
-    const { page } = await readPage(url, { renderJs });
-    if (page) pages.push(page);
+    queue.push(url);
+  }
+  // Batches of 3 pages, started 200 ms apart: it is the restaurant's own site, so no hammering.
+  for (let i = 0; i < queue.length && pages.length < maxPages; ) {
+    const batch = queue.slice(i, i + Math.min(3, maxPages - pages.length));
+    i += batch.length;
+    const read = await Promise.all(
+      batch.map(async (url, n) => {
+        await sleep(n * 200);
+        return readPage(url, { renderJs, browser });
+      }),
+    );
+    for (const { page } of read) if (page) pages.push(page);
   }
 
-  const uniq = (list, key = (x) => x) => list.filter((x, i) => list.findIndex((y) => key(y) === key(x)) === i);
+  const uniq = (list, key = (x) => x) => {
+    const keys = new Set();
+    return list.filter((x) => {
+      const k = key(x);
+      if (keys.has(k)) return false;
+      keys.add(k);
+      return true;
+    });
+  };
   const links = {};
   for (const k of Object.keys(pages[0].links)) links[k] = uniq(pages.flatMap((p) => p.links[k]));
   return {

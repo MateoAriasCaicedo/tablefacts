@@ -5,4 +5,6 @@ node_modules
 !.env.example
 
 # output, caches and browser profiles of a run
+.tablefacts
 .extract
+types

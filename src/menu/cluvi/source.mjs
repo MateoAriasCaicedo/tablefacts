@@ -7,6 +7,7 @@
 //   supplier  https://exp2.cluvi.com/api/suppliers/<slug>.json        id, currency
 //   menu      https://services.cluvi.com/v1/menu/<id>/<service>.json  categories + products
 import { cleanText, htmlToText, isCurrency, matchKey, sectionName, slugify } from "../lib/menu.mjs";
+import { TablefactsError } from "../../lib/errors.mjs";
 
 const SUPPLIER_URL = "https://exp2.cluvi.com/api/suppliers";
 const MENU_URL = "https://services.cluvi.com/v1/menu";
@@ -18,7 +19,7 @@ async function getJson(url) {
     try {
       const res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
       if (res.ok) return await res.json();
-      failure = Object.assign(new Error(`HTTP ${res.status} from ${url}`), { status: res.status });
+      failure = Object.assign(new TablefactsError(`HTTP ${res.status} from ${url}`, "EFAILED"), { status: res.status });
       if (res.status < 500) break; // a client error will not fix itself
     } catch (error) {
       failure = error; // network error, timeout or a body that is not JSON
@@ -34,10 +35,10 @@ export function supplierSlug(menuUrl) {
   try {
     slug = new URL(menuUrl).pathname.split("/").filter(Boolean)[0];
   } catch {
-    throw new Error(`"${menuUrl}" is not a URL.`);
+    throw new TablefactsError(`"${menuUrl}" is not a URL.`, "EUSAGE");
   }
   if (!slug) {
-    throw new Error(`"${menuUrl}" has no supplier in its path. Use a menu page such as https://<restaurant>.cluvi.co/<supplier>/maincategories.`);
+    throw new TablefactsError(`"${menuUrl}" has no supplier in its path. Use a menu page such as https://<restaurant>.cluvi.co/<supplier>/maincategories.`, "EUSAGE");
   }
   return slug;
 }
@@ -49,7 +50,7 @@ export function supplierSlug(menuUrl) {
  */
 export async function fetchCluvi({ url, service = "on_table", lang = "es" }) {
   const slug = supplierSlug(url);
-  const unknown = new Error(`Cluvi has no restaurant "${slug}". Check the first path segment of the menu URL.`);
+  const unknown = new TablefactsError(`Cluvi has no restaurant "${slug}". Check the first path segment of the menu URL.`, "EFAILED");
   let supplier;
   try {
     supplier = await getJson(`${SUPPLIER_URL}/${slug}.json`);
@@ -83,10 +84,10 @@ const listNames = (names) => names.slice(0, 8).join(", ") + (names.length > 8 ? 
 export function normalizeCluvi({ supplier, raw }, config) {
   const { categories, products } = raw?.menu ?? {};
   if (!Array.isArray(categories) || !Array.isArray(products)) {
-    throw new Error("Cluvi returned a menu in an unexpected shape (no menu.categories or menu.products). Its API may have changed: see data/menu/cluvi/source.mjs.");
+    throw new TablefactsError("Cluvi returned a menu in an unexpected shape (no menu.categories or menu.products). Its API may have changed: see src/menu/cluvi/source.mjs.", "EFAILED");
   }
   const currency = [supplier.currency, raw.customer?.currency].map((code) => String(code ?? "").toUpperCase()).find(isCurrency);
-  if (!currency) throw new Error("Cluvi did not say which currency this menu uses.");
+  if (!currency) throw new TablefactsError("Cluvi did not say which currency this menu uses.", "EFAILED");
 
   const notes = [];
   const byId = new Map(products.map((product) => [product.id, product]));

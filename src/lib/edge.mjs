@@ -1,5 +1,5 @@
 // Attaches to the user's own Edge window over the DevTools protocol, starting it when needed.
-// Shared by the tools that drive a real browser (photos:instagram, photos:tripadvisor).
+// Shared by the tools that drive a real browser (photos instagram, photos tripadvisor).
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -12,6 +12,11 @@ const EDGE_PATHS = [
   'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
 ]
 
+/**
+ * Whether a browser answers on the DevTools address.
+ * @param {string} cdp e.g. http://localhost:9222
+ * @returns {Promise<boolean>}
+ */
 export async function cdpUp(cdp) {
   try {
     return (await fetch(new URL('/json/version', cdp), { signal: AbortSignal.timeout(2000) })).ok
@@ -22,6 +27,11 @@ export async function cdpUp(cdp) {
 
 // Starts Edge with remote debugging when nothing answers on the `cdp` address (local only).
 // It is detached, so it stays open after the run and keeps its logins for the next one.
+/**
+ * @param {string} cdp DevTools address; only localhost can be started
+ * @param {string} [edgeDir] Edge profile folder. Default C:\ig-edge
+ * @returns {Promise<void>}
+ */
 export async function ensureEdge(cdp, edgeDir) {
   if (await cdpUp(cdp)) return
   const url = new URL(cdp)

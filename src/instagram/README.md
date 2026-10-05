@@ -1,6 +1,6 @@
 # Instagram photos
 
-Downloads a restaurant's Instagram photos through <https://toolzu.com>, driven by Playwright in **the user's own Edge window**. Used in step 3 of `docs/WORKFLOW.md` to source real photos for `frontend/public/`.
+Downloads a restaurant's Instagram photos through <https://toolzu.com>, driven by Playwright in **the user's own Edge window**. Use it to source real photos for a restaurant's site when it has no originals to send.
 
 | | |
 | --- | --- |
@@ -30,7 +30,7 @@ The script does this for you using the profile folder `C:\ig-edge` (`--edge-dir`
 
 - The `&` is required in PowerShell (without it: `Unexpected token 'remote-debugging-port=9222'`).
 - **Close every other Edge window first**, or Edge ignores the debugging flag and nothing listens on 9222.
-- `--user-data-dir` must be a folder of its own (recent Edge refuses debugging on the default profile). `C:\ig-edge` keeps the toolzu login between sessions. Do not point it at `.extract/instagram-profile`, which the script uses for its own fallback browser.
+- `--user-data-dir` must be a folder of its own (recent Edge refuses debugging on the default profile). `C:\ig-edge` keeps the toolzu login between sessions. Do not point it at `.tablefacts/instagram-profile`, which the script uses for its own fallback browser.
 - Check it is up: `curl http://localhost:9222/json/version` returns JSON. `ECONNREFUSED ::1:9222` means it is not running: ask the user to start it (it opens a window on their screen).
 - First time: in that window open toolzu.com, **sign in or sign up**, then leave it. The profile tool needs the account; the single-post tool does not.
 
@@ -38,22 +38,22 @@ The script does this for you using the profile folder `C:\ig-edge` (`--edge-dir`
 
 ```bash
 # one profile, first batch, listing only (writes nothing)
-extract photos instagram --cdp http://localhost:9222 --google --profile https://www.instagram.com/<user>/ --out <folder> --dry-run
+tablefacts photos instagram --cdp http://localhost:9222 --google --profile https://www.instagram.com/<user>/ --out <folder> --dry-run
 
 # same, for real; several batches
-extract photos instagram --cdp http://localhost:9222 --google --profile @<user> --pages 3 --out <folder>
+tablefacts photos instagram --cdp http://localhost:9222 --google --profile @<user> --pages 3 --out <folder>
 
 # specific posts
-extract photos instagram --cdp http://localhost:9222 --out <folder> <post-link> <post-link>
-extract photos instagram --cdp http://localhost:9222 --out <folder> --file links.txt
+tablefacts photos instagram --cdp http://localhost:9222 --out <folder> <post-link> <post-link>
+tablefacts photos instagram --cdp http://localhost:9222 --out <folder> --file links.txt
 ```
 
 | Flag | Meaning |
 | --- | --- |
-| `--out <folder>` | required; created if missing. Use a scratch folder outside `frontend/public`, then copy what you pick |
+| `--out <folder>` | required; created if missing. Use a scratch folder outside the site's public folder, then copy what you pick |
 | `--cdp <url>` | attach to the user's Edge, starting it if nothing answers (the supported way) |
 | `--edge-dir <dir>` | profile folder for that Edge, where the toolzu login lives (default `C:\ig-edge`) |
-| `--google` | reach toolzu through a Google search first, as the user does (first link only; falls back to the direct address) |
+| `--google` | reach toolzu through a Google search first, as the user does (first link only; falls back to the direct address). Library option: `viaGoogle` |
 | `--profile <link\|@name>` | download a whole profile's photos |
 | `--pages <n\|all>` | with `--profile`, batches of posts to load with NEXT (default 1) |
 | `--dry-run` | print what it would save, write nothing. Do this first |
@@ -63,6 +63,29 @@ extract photos instagram --cdp http://localhost:9222 --out <folder> --file links
 Links may carry tracking queries (`?utm_source=…`, `?img_index=1`); they are stripped and `img_index` is ignored: **every link saves all the images of its post**.
 
 Output: profile photos are `<user>-<instagram file name>.jpg`; post photos are `<shortcode>-<n>.jpg`. A re-run skips files already there. The summary prints saved, already there and failed; the exit code is non-zero if anything failed.
+
+## From code
+
+```js
+import { downloadInstagram } from 'tablefacts'
+
+const { saved, skipped, failed } = await downloadInstagram({
+  links: ['https://www.instagram.com/p/<shortcode>/'],   // and/or `file`, `profile`
+  out: 'photos/instagram',      // relative paths resolve against `projectDir`
+  cdp: 'http://localhost:9222',
+  viaGoogle: true,              // the CLI's --google
+  projectDir: '/path/to/project',
+  log: (message, level) => console.log(level ?? 'info', message),
+})
+for (const { item, reason } of failed) console.error(item, reason)   // the post or profile link that failed
+```
+
+Give at least one of `links`, `file` or `profile`. `out`, `file` and `userDataDir` resolve against `projectDir` (default
+`TABLEFACTS_PROJECT`, then the current folder), as does the fallback browser profile `.tablefacts/instagram-profile`.
+`log(message, level)` gets `'info'`, `'warn'` (skipped links, retries) or `'error'`; without it nothing is printed.
+Bad arguments throw a `TablefactsError` with code `EUSAGE` and `err.option` (`'out'`, `'links'`, `'profile'`); the CLI
+prints them with flag names and exits `2`. A missing Playwright is `EDEPENDENCY`. Post failures do not throw: they are
+in `failed`, and the CLI exits `1` when there are any.
 
 ## What the script does (so you can fix it when toolzu changes)
 
@@ -97,12 +120,12 @@ Verified on the Zelavi profile and one carousel post, signed in to toolzu:
 | `toolzu did not accept the link` | link is not a public profile or post, or toolzu is blocking the request |
 | `the tool returned no photos` / `no images` | markup changed or the account is private; run with `--debug` (post mode) and compare with the selectors above |
 | `clicking Download started nothing` / `Download navigated instead of saving` | the card button now behaves differently; check by hand what happens when a person clicks it |
-| `launchPersistentContext … closed` | another run still holds `.extract/instagram-profile`; stop the `node` process you started |
+| `launchPersistentContext … closed` | another run still holds `.tablefacts/instagram-profile`; stop the `node` process you started |
 
 ## After the download
 
 - Most of a restaurant's feed is event posters and guest photos with text. Look at every image before using it; posters with text rarely belong on the site.
-- Copy the chosen files into `frontend/public/<folder>` and continue with step 3 of `docs/WORKFLOW.md`: `images.ts`, then `photos.ts` with real pixel `width`/`height` and es + en `alt`.
+- Copy the chosen files into your site's public folder, and record real pixel `width`/`height` and an `alt` text for each.
 - In the hand-off list the profile, how many photos were taken, and whether the restaurant confirmed they may be used.
 
 ## Shell notes for agents on Windows

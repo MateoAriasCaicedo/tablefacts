@@ -34,16 +34,16 @@ export async function readInstagram(handle) {
 }
 
 /** TripAdvisor: schema.org JSON-LD when the page loads; DataDome often blocks it. */
-export async function readTripadvisor(url) {
-  const { page, blocked } = await readPage(url);
+export async function readTripadvisor(url, { browser } = {}) {
+  const { page, blocked } = await readPage(url, { browser });
   if (!page) return { url, blocked };
   if (!page.jsonld && page.textLength < 500) return { url, blocked: "bot protection (page has no data)" };
   return { url: page.url, jsonld: page.jsonld, description: page.meta.description, hoursText: page.hoursText, images: page.images.slice(0, 10) };
 }
 
 /** A link-in-bio hub (Linktree, Beacons, bio.link): its links, classified like a website's. */
-export async function readHub(url) {
-  const { page, blocked } = await readPage(url, { renderJs: false });
+export async function readHub(url, { browser } = {}) {
+  const { page, blocked } = await readPage(url, { renderJs: false, browser });
   if (!page) return { url, blocked };
   return { url: page.url, title: page.title, meta: page.meta, links: page.links, anchors: page.anchors.filter((a) => a.text).slice(0, 30), logos: page.logos, images: page.images.slice(0, 10) };
 }

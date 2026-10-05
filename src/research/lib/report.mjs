@@ -70,8 +70,8 @@ export function renderReport(p, { notes, photos }) {
   list("Delivery", p.links.delivery);
   list("Link-in-bio", p.links.hubs);
   list("Waze", p.links.waze);
-  if (p.links.menu.some((u) => /cluvi/i.test(u))) out.push("- The menu is on Cluvi: use `extract menu cluvi` (see `data/menu/README.md`).");
-  else if (p.links.menu.some((u) => /\.pdf/i.test(u))) out.push("- The menu is a PDF: `extract menu raw` reads it.");
+  if (p.links.menu.some((u) => /cluvi/i.test(u))) out.push("- The menu is on Cluvi: use `tablefacts menu cluvi` (see `src/menu/README.md` in the tablefacts package).");
+  else if (p.links.menu.some((u) => /\.pdf/i.test(u))) out.push("- The menu is a PDF: `tablefacts menu raw` reads it.");
   out.push("");
 
   if (p.ratings.length) out.push("## Ratings (context only)", "", ...p.ratings.map((r) => `- ${r.source}: ${r.value}${r.count ? ` (${r.count} reviews)` : ""}`), "");
@@ -93,7 +93,7 @@ export function renderReport(p, { notes, photos }) {
 
   const missing = ROWS.filter(([, key]) => !p.fields[key] && ["name", "street", "coordinates", "whatsapp", "instagram", "reserveUrl", "cuisines"].includes(key)).map(([l]) => l);
   out.push("## Ask the client", "", ...[...missing, "Opening hours incl. holidays", "Logo as SVG and original photos", "The story, signature dishes and events", "Production domain"].filter((v, i, a) => a.indexOf(v) === i && (v !== "Opening hours incl. holidays" || true)).map((m) => `- ${m}`), "");
-  out.push("## Next", "", "```bash", `npm run setup < .extract/research/${q.slug}/setup-answers.txt`, "git diff   # review before keeping it", "```", "", "Blank lines in that file keep the template's current value, so anything not found stays a placeholder.", "");
+  out.push("## Next", "", "```bash", `npm run setup < .tablefacts/research/${q.slug}/setup-answers.txt`, "git diff   # review before keeping it", "```", "", "Blank lines in that file keep the template's current value, so anything not found stays a placeholder.", "");
   return out.join("\n");
 }
 

@@ -1,28 +1,48 @@
 # Menu import
 
-Scripts that read a restaurant's menu from the website that hosts it and write it into the Supabase menu tables the site reads (`data/supabase/migrations/0001_menu.sql`). One folder per source:
+Scripts that read a restaurant's menu from the website that hosts it and write it into the Supabase menu tables the site reads (`menu_categories`, `menu_sections`, `menu_products`; the Cannario templates ship them as `supabase/migrations/0001_menu.sql`, and the columns written are listed in the [main README](../../README.md#supabase-tables)). One folder per source:
 
 | Source | Folder | Status |
 | --- | --- | --- |
 | Cluvi (`<restaurant>.cluvi.co`) | `cluvi/` | working |
 | Menu that is only pictures (one image per page) | `raw/` | working, API calls untested |
-| Eazzy | `eazzy/` | empty |
+
+The same code is available as functions: `importCluvi`, `importImageMenu`, `listMenuImages` and `importMenu` (see the [main README](../../README.md#use-it-as-a-library)). Each source's `config.mjs` can be replaced with the `config` option, so a script can import a menu without editing the package:
+
+```js
+import { importCluvi, listMenuImages } from 'tablefacts'
+
+await importCluvi({
+  url: 'https://gaucho.cluvi.co/gaucho/maincategories',
+  config: { categories: [{ slug: 'cocina', name: 'Comida', from: ['Entradas', 'Fuertes'] }], sections: {} },
+  env: { SUPABASE_DB_URL: process.env.MY_DB_URL },   // keys are read from `env` (default process.env)
+  dryRun: true,
+  log: (message, level) => console.log(level ?? 'info', message),
+})
+const pictures = await listMenuImages({ urls: ['https://example.com/carta'], config: { currency: 'COP' } })
+```
+
+- **Cluvi `config`**: `{ url?, categories: [{ slug, name, from[] }], sections: { 'Cluvi subcategory': 'SECTION NAME' } }`.
+- **Picture `config`**: `{ url?, currency, thousands, decimal, scale, categories: [{ slug, name, groups: ['food' | 'drink'] }], placeIn, sections, skipSections }`. `currency` is required.
+- **Options every import takes**: `dryRun`, `json` (relative paths resolve against `projectDir`), `replaceAll`, `force`, `databaseUrl` (default `env.SUPABASE_DB_URL`), `env`, `projectDir` and `log(message, level)` (`'info'`, `'warn'` for notes, `'error'`).
+- **Result**: `{ totals, notes, written, dryRun, database }`; `database` is `{ label, current: { categories, products, kept } }` once the database was inspected, and `null` when it was not reached (a dry run without a URL).
+- **Errors** are `TablefactsError`: `ECONFIG` (no URL, unknown provider, no key, bad currency), `EFAILED` (invalid menu, no products, import refused without `force`), `EUSAGE` (bad `only`). `err.option` names the option; the CLI shows the flag (`--force`, `--only`) and exits `2` for `EUSAGE`, `1` otherwise.
 
 ## Setup
 
-1. `npm install` in the repo root (installs `pg`).
+1. Install the package in the project (`npm install --save-dev tablefacts`); it brings `pg`. Run the commands from the project's folder.
 2. Apply the migration to your Supabase project.
 3. `cp .env.example .env` and set `SUPABASE_DB_URL` to the pooler URL from the Supabase dashboard (Connect > Transaction pooler), with the real password.
 
-`SUPABASE_DB_URL` bypasses row level security. It stays in `.env` (git-ignored). Never copy it into `frontend/.env` or a `NEXT_PUBLIC_` variable: the site only uses the publishable key.
+`SUPABASE_DB_URL` bypasses row level security. It stays in `.env` (git-ignored). Never copy it into a browser-exposed variable (such as `NEXT_PUBLIC_*`): the site only uses the publishable key.
 
 ## Run (Cluvi)
 
 ```bash
-extract menu cluvi --dry-run        # extract and check, show what would change, write nothing
-extract menu cluvi                     # replace the menu in Supabase
-extract menu cluvi <menu-url>       # another restaurant
-extract menu cluvi --help
+tablefacts menu cluvi --dry-run        # extract and check, show what would change, write nothing
+tablefacts menu cluvi                     # replace the menu in Supabase
+tablefacts menu cluvi <menu-url>       # another restaurant
+tablefacts menu cluvi --help
 ```
 
 Edit `cluvi/config.mjs` first: the menu URL, how Cluvi's main categories fold into the site's categories, and section renames. The run prints what the site still needs (dictionary keys, `content/qr.ts`).
@@ -40,12 +60,12 @@ For a restaurant whose site shows the menu as a gallery of page images, such as 
 Choose the provider per run with `--provider`, or once for every run with `MENU_VISION_PROVIDER` in `.env`.
 
 ```bash
-extract menu raw --list                 # show the pictures found; no key needed, nothing read or written
-extract menu raw --dry-run              # read the pages, show the menu and the checks, write nothing
-extract menu raw --only 3,9 --dry-run   # try two pages first
-extract menu raw --provider gemini --dry-run   # the same, read by Gemini
-extract menu raw                           # replace the menu in Supabase
-extract menu raw <page-or-image-url>... # another restaurant
+tablefacts menu raw --list                 # show the pictures found; no key needed, nothing read or written
+tablefacts menu raw --dry-run              # read the pages, show the menu and the checks, write nothing
+tablefacts menu raw --only 3,9 --dry-run   # try two pages first
+tablefacts menu raw --provider gemini --dry-run   # the same, read by Gemini
+tablefacts menu raw                           # replace the menu in Supabase
+tablefacts menu raw <page-or-image-url>... # another restaurant
 ```
 
 Edit `raw/config.mjs` first: the URL, the currency, how the menu prints prices (`$95.000` is `thousands: "."`, `decimal: ","`) and which category each section goes to.
@@ -55,7 +75,7 @@ Edit `raw/config.mjs` first: the URL, the currency, how the menu prints prices (
 - Groq serves a single vision model, `qwen/qwen3.8-27b`, and it is a preview one: if Groq retires it, pass its successor with `--model`.
 - Rate limits (HTTP 429) are retried after the wait the service asks for, up to a minute; for a longer wait the run stops with the service's message. Pages already read are saved (below), so run it again later.
 - The model tags each section food, drink or other; `config.categories` maps those to the site's categories. A section with no heading continues the one before it, even across pages. A dish with several price columns (bottle and glass) becomes one product per column, "Name (Botella)".
-- Each page's transcription is saved in `raw/.cache/<host>/<id>.json` (git-ignored) and reused on the next run, so re-running costs nothing. Edit a file there to fix a misread page; `--refresh` reads everything again. The saved pages are shared by all providers, so after switching provider or model, add `--refresh` or the pages already read are reused.
+- Each page's transcription is saved in `<project>/.tablefacts/cache/<host>/<id>.json` (git-ignored) and reused on the next run, so re-running costs nothing. Edit a file there to fix a misread page; `--refresh` reads everything again. The saved pages are shared by all providers, so after switching provider or model, add `--refresh` or the pages already read are reused.
 - **Read the dry run against the pictures before writing.** The model can misread small print, and a wrong price is worse than a missing dish. Pages it was unsure of are listed in the notes. There are no dish photos, so `image_url` is empty.
 
 ## What it does (Cluvi)
@@ -63,7 +83,7 @@ Edit `raw/config.mjs` first: the URL, the currency, how the menu prints prices (
 - Cluvi main category > site category, subcategory > section (name in UPPERCASE), product > product. Products keep the order Cluvi shows (its `order` field). Cluvi's "important" flag is `recommended`. Descriptions are converted from HTML to text.
 - The write is one transaction. By default only the categories in the import are replaced (their sections and products with them), so re-running never duplicates. `--replace-all` replaces the whole menu, which also removes the template's sample categories.
 - It refuses an import with no products, or with under half the products it replaces (`--force` overrides), so a broken extraction cannot empty the menu.
-- Photos stay on Cluvi's CDN: `image_url` holds the Cluvi URL, and `menuImageHosts` in `frontend/src/content/site.ts` must list `images.cluvi.com` and `images-mini.cluvi.com` (the run warns when it does not). If the restaurant leaves Cluvi, the photos must be re-hosted (Supabase Storage needs a different credential than the DB URL).
+- Photos stay on Cluvi's CDN: `image_url` holds the Cluvi URL, and your site must allow `images.cluvi.com` and `images-mini.cluvi.com` as image hosts (a template with `menuImageHosts` in `frontend/src/content/site.ts` gets a warning from the run when they are missing). If the restaurant leaves Cluvi, the photos must be re-hosted (Supabase Storage needs a different credential than the DB URL).
 
 ## Known limits
 
@@ -74,4 +94,4 @@ Edit `raw/config.mjs` first: the URL, the currency, how the menu prints prices (
 
 ## Adding a source
 
-Create `src/menu/<source>/` with a script that calls `runImport` from `lib/run.mjs` and returns the menu in the shape described in `lib/menu.mjs`. The flags, checks and the database write are shared. Add the source's image CDN to `menuImageHosts` in `frontend/src/content/site.ts`.
+Create `src/menu/<source>/` with a script that calls `runImport` from `lib/run.mjs` and returns the menu in the shape described in `lib/menu.mjs`. The flags, checks and the database write are shared. If the source's photos stay on its own CDN, allow that host in your site's image settings.

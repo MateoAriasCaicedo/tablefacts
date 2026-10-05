@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { connect, inspect, loadEnv, replaceMenu } from "../src/menu/lib/db.mjs";
+import { loadEnvFiles } from "../src/lib/env.mjs";
+import { connect, inspect, replaceMenu } from "../src/menu/lib/db.mjs";
 
 type Anything = Record<string, any>;
 
@@ -21,9 +22,9 @@ afterEach(() => {
   for (const key of ["CANNARIO_T_A", "CANNARIO_T_B", "CANNARIO_T_C", "CANNARIO_T_D", "CANNARIO_T_E"]) delete process.env[key];
 });
 
-describe("loadEnv", () => {
+describe("loadEnvFiles", () => {
   it("reads KEY=value lines, quotes, `export` and comments", () => {
-    loadEnv(envFile(["# a comment", "CANNARIO_T_A=plain", 'CANNARIO_T_B="quoted value"', "export CANNARIO_T_C='single'", "  CANNARIO_T_D = spaced  ", "not a line"].join("\n")));
+    loadEnvFiles([envFile(["# a comment", "CANNARIO_T_A=plain", 'CANNARIO_T_B="quoted value"', "export CANNARIO_T_C='single'", "  CANNARIO_T_D = spaced  ", "not a line"].join("\n"))]);
     expect(process.env.CANNARIO_T_A).toBe("plain");
     expect(process.env.CANNARIO_T_B).toBe("quoted value");
     expect(process.env.CANNARIO_T_C).toBe("single");
@@ -33,24 +34,24 @@ describe("loadEnv", () => {
   it("does not override what the environment already sets, even to empty", () => {
     process.env.CANNARIO_T_A = "from-shell";
     process.env.CANNARIO_T_B = "";
-    loadEnv(envFile("CANNARIO_T_A=from-file\nCANNARIO_T_B=from-file"));
+    loadEnvFiles([envFile("CANNARIO_T_A=from-file\nCANNARIO_T_B=from-file")]);
     expect(process.env.CANNARIO_T_A).toBe("from-shell");
     expect(process.env.CANNARIO_T_B).toBe("");
   });
 
   it("copes with Windows line endings and a byte-order mark", () => {
-    loadEnv(envFile("﻿CANNARIO_T_A=one\r\nCANNARIO_T_B=two\r\n"));
+    loadEnvFiles([envFile("﻿CANNARIO_T_A=one\r\nCANNARIO_T_B=two\r\n")]);
     expect(process.env.CANNARIO_T_A).toBe("one");
     expect(process.env.CANNARIO_T_B).toBe("two");
   });
 
   it("ignores a commented-out assignment", () => {
-    loadEnv(envFile("#CANNARIO_T_A=hidden"));
+    loadEnvFiles([envFile("#CANNARIO_T_A=hidden")]);
     expect(process.env.CANNARIO_T_A).toBeUndefined();
   });
 
   it("does nothing when the file does not exist", () => {
-    expect(() => loadEnv(join(tmpdir(), "cannario-no-such-dir", ".env"))).not.toThrow();
+    expect(() => loadEnvFiles([join(tmpdir(), "cannario-no-such-dir", ".env")])).not.toThrow();
   });
 });
 

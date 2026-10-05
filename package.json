@@ -1,32 +1,68 @@
 {
-  "name": "extract",
+  "name": "tablefacts",
   "version": "0.1.0",
-  "private": true,
   "description": "Data extraction tools for restaurant sites: public-facts research, photos (Instagram, TripAdvisor) and menu import",
+  "keywords": [
+    "restaurant",
+    "menu",
+    "scraper",
+    "tripadvisor",
+    "instagram",
+    "supabase",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "Mateo Arias",
   "type": "module",
   "engines": {
     "node": ">=24"
   },
+  "main": "./src/index.mjs",
+  "types": "./types/index.d.mts",
   "bin": {
-    "extract": "bin/extract.mjs"
+    "tablefacts": "bin/tablefacts.mjs"
   },
   "exports": {
-    "./edge": "./src/lib/edge.mjs",
-    "./project": "./src/lib/project.mjs"
+    ".": {
+      "types": "./types/index.d.mts",
+      "default": "./src/index.mjs"
+    },
+    "./edge": {
+      "types": "./types/lib/edge.d.mts",
+      "default": "./src/lib/edge.mjs"
+    },
+    "./project": {
+      "types": "./types/lib/project.d.mts",
+      "default": "./src/lib/project.mjs"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "bin",
     "src",
+    "types",
     ".env.example"
   ],
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:types": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build:types && npm test"
   },
   "dependencies": {
-    "pg": "^8.23.1",
-    "playwright": "^1.63.0"
+    "pg": "^8.23.1"
   },
   "devDependencies": {
+    "@types/node": "^24.19.1",
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2",
     "vitest": "^5.0.3"
+  },
+  "peerDependencies": {
+    "playwright": "^1.63.0"
+  },
+  "peerDependenciesMeta": {
+    "playwright": {
+      "optional": true
+    }
   }
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 // The importers are plain ES modules; TypeScript infers their types from the JS.
 import { cleanText, countMenu, htmlToText, isCurrency, matchKey, sectionName, slugify, validateMenu } from "../src/menu/lib/menu.mjs";
-import { templateHints } from "../src/menu/lib/run.mjs";
+import { templateHints } from "../src/menu/lib/import.mjs";
 
 type Product = { name: string; price: number; currency: string; image_url: string | null };
 const product = (over: Partial<Product> = {}): Product => ({
@@ -61,7 +61,7 @@ describe("validateMenu", () => {
   });
 });
 
-describe("templateHints", () => {
+describe("templateHints", async () => {
   const withSignature = [
     {
       slug: "bar",
@@ -70,23 +70,23 @@ describe("templateHints", () => {
     },
   ];
 
-  it("is quiet for a menu the template already fits", () => {
-    const hints: string[] = templateHints(withSignature);
+  it("is quiet for a menu the template already fits", async () => {
+    const hints: string[] = await templateHints(withSignature);
     expect(hints.filter((h) => h.includes("cocktail list"))).toEqual([]);
     expect(hints.filter((h) => h.includes("menuImageHosts"))).toEqual([]);
   });
-  it("warns when there is no signature section", () => {
-    const hints: string[] = templateHints(menu([{ name: "ENTRADAS", products: [product()] }], "bar"));
+  it("warns when there is no signature section", async () => {
+    const hints: string[] = await templateHints(menu([{ name: "ENTRADAS", products: [product()] }], "bar"));
     expect(hints.some((h) => h.includes("signatureMenu") && h.includes("COCTELES DE AUTOR"))).toBe(true);
   });
-  it("warns about a photo host the site does not allow", () => {
-    const hints: string[] = templateHints(
+  it("warns about a photo host the site does not allow", async () => {
+    const hints: string[] = await templateHints(
       menu([{ name: "ENTRADAS", products: [product({ image_url: "https://cdn.unlisted.example/a.jpg" })] }]),
     );
     expect(hints.some((h) => h.includes("cdn.unlisted.example"))).toBe(true);
   });
-  it("warns about a category the QR menu does not know", () => {
-    const hints: string[] = templateHints(menu([{ name: "X", products: [product()] }], "postres"));
+  it("warns about a category the QR menu does not know", async () => {
+    const hints: string[] = await templateHints(menu([{ name: "X", products: [product()] }], "postres"));
     expect(hints.some((h) => h.includes("qrCategories") && h.includes("postres"))).toBe(true);
   });
 });

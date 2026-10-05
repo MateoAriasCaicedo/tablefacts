@@ -1,6 +1,8 @@
 // The pure parts of photos.mjs: the command line, the restaurant link and the photo URLs.
 // Split out so they can be tested without starting a browser.
 
+import { usageError } from '../lib/errors.mjs'
+
 export function parseArgs(argv) {
   const opts = { links: [], dryRun: false, debug: false, max: Infinity }
   for (let i = 0; i < argv.length; i++) {
@@ -10,11 +12,11 @@ export function parseArgs(argv) {
     else if (a === '--edge-dir') opts.edgeDir = argv[++i]
     else if (a === '--max') {
       opts.max = Number(argv[++i])
-      if (!(opts.max > 0)) throw new Error('--max needs a number above 0')
+      if (!(opts.max > 0)) throw usageError('--max needs a number above 0')
     } else if (a === '--dry-run') opts.dryRun = true
     else if (a === '--debug') opts.debug = true
     else if (a === '--help' || a === '-h') opts.help = true
-    else if (a.startsWith('--')) throw new Error(`Unknown option ${a}`)
+    else if (a.startsWith('--')) throw usageError(`Unknown option ${a}`)
     else opts.links.push(a)
   }
   return opts

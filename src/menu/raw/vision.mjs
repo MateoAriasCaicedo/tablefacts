@@ -9,6 +9,8 @@
 // the instructions, the retries and the checks are shared, so all of them return
 // the same `{ sections, notes }`.
 import { readFileSync } from "node:fs";
+import { resolveEnv } from "../../lib/env.mjs";
+import { optionError, TablefactsError } from "../../lib/errors.mjs";
 
 const TOOL = "record_menu_page";
 const MAX_TOKENS = 16000; // Groq's model stops at 16,384
@@ -94,7 +96,7 @@ const rules = `Rules:
 const asToolCall = `${intro} Call ${TOOL} exactly once.\n\n${rules}`;
 const asJson = `${intro} Answer with one JSON object that follows this JSON Schema, and nothing else.\n\n${rules}\n\nJSON Schema:\n${JSON.stringify(schema)}`;
 
-const unusable = (why) => new Error(`The model did not return a usable transcription: ${why}.`);
+const unusable = (why) => new TablefactsError(`The model did not return a usable transcription: ${why}.`, "EFAILED");
 
 /** A JSON answer that stops in the middle was cut off by the token limit. */
 function parseJson(text, cutOff) {
@@ -107,6 +109,7 @@ function parseJson(text, cutOff) {
 
 // `request` builds the call for one picture (`data` is its base64) and `read`
 // returns the transcription object from the answer, or throws why there is none.
+/** @type {Record<string, import('../../lib/types.mjs').VisionProvider>} */
 export const providers = {
   anthropic: {
     label: "Anthropic",
@@ -171,7 +174,7 @@ export const providers = {
     label: "Groq",
     keyName: "GROQ_API_KEY",
     // The only vision model Groq lists (October 2026), and a preview one: when
-    // it is retired, `--model` names its successor.
+    // it is retired, `model` names its successor.
     defaultModel: "qwen/qwen3.8-27b",
     request: ({ model, apiKey, data, mediaType }) => ({
       url: "https://api.groq.com/openai/v1/chat/completions",
@@ -208,18 +211,19 @@ function askedWait(res, detail) {
 
 async function callApi(label, { url, headers, body }) {
   let failure;
+  const payload = JSON.stringify(body);
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     let wait = attempt * 2000;
     try {
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json", ...headers },
-        body: JSON.stringify(body),
+        body: payload,
         signal: AbortSignal.timeout(180_000),
       });
       if (res.ok) return await res.json();
       const detail = await res.text();
-      failure = Object.assign(new Error(`${label} API ${res.status}: ${detail.slice(0, 300)}`), { status: res.status });
+      failure = Object.assign(new TablefactsError(`${label} API ${res.status}: ${detail.slice(0, 300)}`, "EFAILED"), { status: res.status });
       if (!RETRY_STATUSES.includes(res.status)) break; // a bad key or request will not fix itself
       const asked = askedWait(res, detail);
       if (asked > LONGEST_WAIT) break; // a quota that refills in hours is not worth waiting for here
@@ -233,13 +237,13 @@ async function callApi(label, { url, headers, body }) {
 }
 
 /** `file` is a downloaded picture; returns `{ sections, notes }` as the schema above describes. */
-export async function readPage({ file, mediaType }, { provider = defaultProvider, model, apiKey } = {}) {
+export async function readPage({ file, mediaType }, { provider = defaultProvider, model, apiKey, env } = {}) {
   const reader = Object.hasOwn(providers, provider) ? providers[provider] : null;
   const names = Object.keys(providers).join(", ");
-  if (!reader) throw new Error(`"${provider}" is not a provider the pages can be read with (${names}).`);
-  apiKey ??= process.env[reader.keyName];
+  if (!reader) throw optionError("provider", `"${provider}" is not a provider the pages can be read with (${names}).`, "ECONFIG");
+  apiKey ??= resolveEnv(env)[reader.keyName];
   if (!apiKey) {
-    throw new Error(`${reader.keyName} is not set. Add it to .env (see .env.example); the menu pages are read with ${reader.label}. To use another provider, pass --provider (${names}).`);
+    throw optionError("provider", `${reader.keyName} is not set. Add it to .env (see .env.example); the menu pages are read with ${reader.label}. To use another provider, pass \`provider\` (${names}).`, "ECONFIG");
   }
   const request = reader.request({ model: model ?? reader.defaultModel, apiKey, data: readFileSync(file).toString("base64"), mediaType });
   const answer = reader.read(await callApi(reader.label, request));

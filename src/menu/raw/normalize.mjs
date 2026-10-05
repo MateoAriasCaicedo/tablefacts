@@ -1,10 +1,14 @@
 // Transcribed menu pages (vision.mjs) to the shape lib/menu.mjs describes.
 import { cleanText, isCurrency, matchKey, sectionName } from "../lib/menu.mjs";
+import { TablefactsError } from "../../lib/errors.mjs";
 
 /**
  * "$95.000" to 95000. `thousands` and `decimal` are the separators the menu
  * prints (Colombia: "." and ","); `scale` multiplies the result for menus that
  * print "95" meaning 95.000. Returns null for text with no number.
+ * @param {string} text
+ * @param {import('../../lib/types.mjs').PriceFormat} [format]
+ * @returns {number | null}
  */
 export function parsePrice(text, { thousands = ".", decimal = ",", scale = 1 } = {}) {
   let digits = String(text ?? "").replace(/[^\d.,]/g, "");
@@ -24,11 +28,14 @@ const listNames = (names) => names.slice(0, 6).join(", ") + (names.length > 6 ? 
  * category of `config.categories` that lists its group (food, drink), unless
  * `config.placeIn` names it. An item with several priced columns becomes one
  * product per column, "Name (Botella)", because a product has one price.
+ * @param {{ number?: number, notes?: string[], sections?: any[] }[]} pages transcriptions, one per page
+ * @param {import('../../lib/types.mjs').RawConfig} config
+ * @returns {{ menu: import('../../lib/types.mjs').Menu, notes: string[], currency: string }}
  */
 export function normalizePages(pages, config) {
   const notes = [];
   const currency = String(config.currency ?? "").toUpperCase();
-  if (!isCurrency(currency)) throw new Error(`config.currency "${config.currency}" is not a currency code (such as COP or USD).`);
+  if (!isCurrency(currency)) throw new TablefactsError(`config.currency "${config.currency}" is not a currency code (such as COP or USD).`, "ECONFIG");
 
   const categories = (config.categories ?? []).map((c) => ({ ...c, sections: new Map() }));
   const bySlug = new Map(categories.map((c) => [c.slug, c]));
@@ -36,7 +43,7 @@ export function normalizePages(pages, config) {
   const renames = new Map(Object.entries(config.sections ?? {}).map(([from, to]) => [matchKey(from), to]));
   const placeIn = new Map(Object.entries(config.placeIn ?? {}).map(([from, slug]) => [matchKey(from), slug]));
   const skip = new Set((config.skipSections ?? []).map(matchKey));
-  for (const slug of placeIn.values()) if (!bySlug.has(slug)) throw new Error(`config.placeIn points at "${slug}", which is not in config.categories.`);
+  for (const slug of placeIn.values()) if (!bySlug.has(slug)) throw new TablefactsError(`config.placeIn points at "${slug}", which is not in config.categories.`, "ECONFIG");
 
   const unparsed = [];
   const unlabeled = [];

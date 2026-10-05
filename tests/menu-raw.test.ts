@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import * as mod1 from "../src/menu/raw/normalize.mjs";
 const { normalizePages, parsePrice } = mod1 as Record<string, any>;
 import * as mod2 from "../src/menu/raw/source.mjs";
-const { cacheRoot, discoverPages, downloadPage, findImages, pageId } = mod2 as Record<string, any>;
+const { discoverPages, downloadPage, findImages, pageId } = mod2 as Record<string, any>;
+import { workDirIn } from "../src/lib/project.mjs";
 import * as mod3 from "../src/menu/raw/vision.mjs";
 const { defaultProvider, providers, readPage } = mod3 as Record<string, any>;
 
@@ -271,29 +272,31 @@ describe("pageId", () => {
 
 describe("downloadPage", () => {
   const host = `unit-test-${process.pid}`;
+  const projectDir = mkdtempSync(join(tmpdir(), "tablefacts-cache-"));
+  const cacheRoot = workDirIn(projectDir, "cache");
   afterEach(() => rmSync(join(cacheRoot, host), { recursive: true, force: true }));
 
   it("downloads once and serves the next call from the cache", async () => {
     const fetchMock = vi.fn(async () => reply({ headers: { "content-type": "image/png; charset=binary" }, bytes: new Uint8Array([9, 9]) }));
     vi.stubGlobal("fetch", fetchMock);
-    const first = await downloadPage({ url: "https://x.co/a.png" }, host);
+    const first = await downloadPage({ url: "https://x.co/a.png" }, host, { projectDir });
     expect(first.mediaType).toBe("image/png");
     expect(first.file.endsWith(".png")).toBe(true);
     expect([...readFileSync(first.file)]).toEqual([9, 9]);
-    const second = await downloadPage({ url: "https://x.co/a.png" }, host);
+    const second = await downloadPage({ url: "https://x.co/a.png" }, host, { projectDir });
     expect(second).toEqual(first);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("refuses anything that is not a JPG, PNG or WebP", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => reply({ headers: { "content-type": "text/html" } })));
-    await expect(downloadPage({ url: "https://x.co/a.jpg" }, host)).rejects.toThrow("is text/html, not a JPG, PNG or WebP image");
+    await expect(downloadPage({ url: "https://x.co/a.jpg" }, host, { projectDir })).rejects.toThrow("is text/html, not a JPG, PNG or WebP image");
     expect(existsSync(join(cacheRoot, host, `${pageId("https://x.co/a.jpg")}.jpg`))).toBe(false);
   });
 
   it("refuses a picture over 5 MB, which some providers cannot read", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => reply({ headers: { "content-type": "image/jpeg" }, bytes: new Uint8Array(5 * 1024 * 1024 + 1) })));
-    await expect(downloadPage({ url: "https://x.co/big.jpg" }, host)).rejects.toThrow(/5\.0 MB; menu pages are limited to 5 MB/);
+    await expect(downloadPage({ url: "https://x.co/big.jpg" }, host, { projectDir })).rejects.toThrow(/5\.0 MB; menu pages are limited to 5 MB/);
   });
 });
 

@@ -2,7 +2,7 @@
 // source.mjs, when the menu is organised differently.
 export default {
   // Any page of the restaurant's Cluvi menu. Only the first path segment is
-  // used (the supplier, here "cannario"). `extract menu cluvi <url>`
+  // used (the supplier, here "cannario"). `tablefacts menu cluvi <url>`
   // overrides it for one run.
   url: "https://cannario.cluvi.co/cannario/maincategories",
 

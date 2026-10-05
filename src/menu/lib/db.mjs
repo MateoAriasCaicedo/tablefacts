@@ -6,37 +6,30 @@
 // .env, which is git-ignored, and is never read by the site: do not copy
 // it into frontend/.env or into a NEXT_PUBLIC_ variable.
 import { randomUUID } from "node:crypto";
-import { loadEnvFiles } from "../../lib/env.mjs";
-
-/** Loads the project's .env (or only `file`), without overriding variables already set. */
-export function loadEnv(file) {
-  loadEnvFiles(file ? [file] : undefined);
-}
+import { resolveEnv } from "../../lib/env.mjs";
+import { TablefactsError } from "../../lib/errors.mjs";
 
 /** Opens the connection. `label` names the target without the credentials. */
-export async function connect(url = process.env.SUPABASE_DB_URL) {
+export async function connect(url, { env } = {}) {
+  url ??= resolveEnv(env).SUPABASE_DB_URL;
   if (!/^postgres(ql)?:\/\//i.test(url ?? "")) {
-    throw new Error(
+    throw new TablefactsError(
       "SUPABASE_DB_URL is not set to a postgres:// connection string.\n" +
         "Copy .env.example to .env and paste the pooler URL from the Supabase dashboard (Connect > Transaction pooler).",
+      "ECONFIG",
     );
   }
   if (url.includes("[YOUR-PASSWORD]")) {
-    throw new Error("SUPABASE_DB_URL still contains [YOUR-PASSWORD]: replace it with the database password.");
+    throw new TablefactsError("SUPABASE_DB_URL still contains [YOUR-PASSWORD]: replace it with the database password.", "ECONFIG");
   }
   let target;
   try {
     target = new URL(url);
   } catch {
-    throw new Error("SUPABASE_DB_URL is not a valid connection string (special characters in the password must be URL-encoded).");
+    throw new TablefactsError("SUPABASE_DB_URL is not a valid connection string (special characters in the password must be URL-encoded).", "ECONFIG");
   }
 
-  let pg;
-  try {
-    ({ default: pg } = await import("pg"));
-  } catch {
-    throw new Error("The pg package is not installed. Run `npm install` in the repository root.");
-  }
+  const { default: pg } = await import("pg");
   const client = new pg.Client({
     connectionString: url,
     // Supabase's pooler certificate chains to Supabase's own root CA, which Node
