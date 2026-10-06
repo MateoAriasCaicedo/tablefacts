@@ -1,6 +1,6 @@
 {
   "name": "tablefacts",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Data extraction tools for restaurant sites: public-facts research, photos (Instagram, TripAdvisor) and menu import from Cluvi, pictures or PDFs",
   "keywords": [
     "restaurant",

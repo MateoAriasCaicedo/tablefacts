@@ -154,7 +154,7 @@ export function setupAnswers(p) {
   // instead of a guess being written in as though it were a discovered fact.
   const sure = (field) => (field && field.confidence !== "low" ? field : null);
   const ig = sure(f.instagram)?.value;
-  return [
+  const start = [
     val(sure(f.name)),
     "", // production URL: the new domain, not the current website
     sure(f.reserveUrl)?.value ?? "",
@@ -167,5 +167,21 @@ export function setupAnswers(p) {
     sure(f.coordinates)?.value?.lat ?? "",
     sure(f.coordinates)?.value?.lng ?? "",
     val(sure(f.cuisines)),
-  ].join("\n") + "\n";
+  ];
+  // The template asks these after `cuisines`. The first 12 lines must not move, so
+  // a setup-answers.txt from an older run still lines up prompt for prompt.
+  const wa = String(sure(f.whatsapp)?.value ?? "").replace(/\D/g, "");
+  const phone = val(sure(f.phone));
+  const menuLocale = String(sure(f.menuLocale)?.value ?? "").toLowerCase();
+  const tail = [
+    val(sure(f.descriptor)), // tagline, first language
+    "", // tagline in English: translate the descriptor yourself
+    // The template hides a phone that duplicates WhatsApp, so write it only when it differs.
+    phone && phone.replace(/\D/g, "") !== wa ? phone : "",
+    val(sure(f.email)),
+    // setup.mjs validates the menu language in a loop: an invalid value would make it
+    // swallow the next line, so only a clean `es` or `en` is emitted.
+    menuLocale === "es" || menuLocale === "en" ? menuLocale : "",
+  ];
+  return [...start, ...tail].join("\n") + "\n";
 }

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.1
+
+### Research (`tablefacts research`)
+
+- `setup-answers.txt` now matches the template's current `npm run setup` prompts. After the original twelve
+  lines it appends the tagline's first language (from `descriptor`), `phone` (blank when it is the WhatsApp
+  number the template hides), `email` and the normalized menu language (`es`/`en`, else blank). The first
+  twelve lines are unchanged, so a file from 0.3.0 still lines up and an invalid menu language cannot consume
+  the next stdin line. `src/research/README.md` is corrected to match.
+
 ## 0.3.0
 
 ### Menu (`tablefacts menu raw`)

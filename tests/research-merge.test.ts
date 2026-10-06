@@ -404,6 +404,66 @@ describe("setupAnswers", () => {
     expect(lines[12]).toBe("");
   });
 
+  // A profile with every field `setup.mjs` now asks for, all at a trustable confidence.
+  const fullFields = (over: Anything = {}) => ({
+    reserveUrl: { value: "https://opentable.com/gaucho", source: "website", confidence: "medium" },
+    whatsapp: { value: "573001234567", display: "+57 300 123 4567", source: "website", confidence: "medium" },
+    instagram: { value: "casa_gaucho", source: "website", confidence: "medium" },
+    name: { value: "Gaucho", source: "google", confidence: "high" },
+    street: { value: "Cra 35 # 8-30", source: "google", confidence: "medium" },
+    locality: { value: "Medellín", source: "google", confidence: "medium" },
+    region: { value: "Antioquia", source: "google", confidence: "medium" },
+    country: { value: "CO", source: "google", confidence: "medium" },
+    coordinates: { value: { lat: 6.2, lng: -75.57 }, source: "google", confidence: "medium" },
+    cuisines: { value: ["Steakhouse", "Latin"], source: "google", confidence: "medium" },
+    descriptor: { value: "Fuego y tradición", source: "google", confidence: "medium" },
+    phone: { value: "+57 604 555 0000", source: "google", confidence: "medium" },
+    email: { value: "hola@gaucho.co", source: "website", confidence: "medium" },
+    menuLocale: { value: "es", source: "website language", confidence: "medium" },
+    ...over,
+  });
+
+  it("appends the newer prompts after cuisines, ending on the menu language", () => {
+    const lines = (setupAnswers({ fields: fullFields() } as never) as string).split("\n");
+    expect(lines.slice(0, 17)).toEqual([
+      "Gaucho",
+      "", // production URL
+      "https://opentable.com/gaucho",
+      "+57 300 123 4567", // WhatsApp display
+      "@casa_gaucho",
+      "Cra 35 # 8-30",
+      "Medellín",
+      "Antioquia",
+      "CO",
+      "6.2",
+      "-75.57",
+      "Steakhouse, Latin",
+      "Fuego y tradición", // descriptor → first (Spanish) tagline
+      "", // English tagline: translate the descriptor
+      "+57 604 555 0000", // phone, kept because it differs from WhatsApp
+      "hola@gaucho.co",
+      "es", // menu language
+    ]);
+    expect(lines[17]).toBe(""); // one final newline, no empty trailing line
+  });
+
+  it("blanks the phone line when it is the WhatsApp number the template hides", () => {
+    const lines = (setupAnswers({ fields: fullFields({ phone: { value: "+57 300 123 4567", source: "google", confidence: "medium" } }) } as never) as string).split("\n");
+    expect(lines[14]).toBe("");
+  });
+
+  it("normalises the menu language and drops anything that is not es or en", () => {
+    const at = (value: string) => (setupAnswers({ fields: fullFields({ menuLocale: { value, source: "website language", confidence: "medium" } }) } as never) as string).split("\n")[16];
+    expect(at("ES")).toBe("es");
+    expect(at("es, en")).toBe("");
+    expect(at("")).toBe("");
+  });
+
+  it("leaves any low-confidence field blank rather than writing in a guess", () => {
+    const lines = (setupAnswers({ fields: fullFields({ descriptor: { value: "Fuego y tradición", source: "google", confidence: "low" } }) } as never) as string).split("\n");
+    expect(lines[12]).toBe("");
+  });
+
   it("leaves a blank line for what was not found, which keeps the template's value", () => {
     const lines = (setupAnswers(build({}) as never) as string).split("\n");
     expect(lines.slice(0, 12).every((line) => line === "")).toBe(true);
