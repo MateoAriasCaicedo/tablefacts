@@ -68,7 +68,7 @@ fell back to a smaller size on this run.
 
 ### Live verification — blocked
 
-Three attempts (direct, `--google`, retry) all ended with:
+Every attempt (direct, `--google`, retries, and a later background run) ended with:
 
 ```
 the Cloudflare check was not passed (use `cdp` with your own browser, or solve it by hand)
